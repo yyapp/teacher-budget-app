@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>초안 확인</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff; --warn: #d97706;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        h2 { font-size: 16px; margin: 0 0 10px; }
+        .section { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafbfc; }
+        .form-row { margin-bottom: 10px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 150px; }
+        .item-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; align-items:center; }
+        .item-row input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; }
+        .item-row input[type="number"] { max-width: 110px; }
+        .warn { color: var(--warn); font-size: 13px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .btn-add { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .alert-warn { background: #fffbeb; border: 1px solid #fde68a; color: var(--warn); }
+        .note { font-size: 12px; color: var(--muted); }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+
+        <div class="card">
+            <h1>초안 확인</h1>
+            <p class="note"> 인식 결과나 수기 초안을 확인하고 수정한 뒤 저장합니다. 인식만으로 확정하지 않습니다.</p>
+
+            {% if result %}
+                <div class="alert alert-warn">
+                    미확인 항목이 있으면 0으로 채우지 않고 확인 사항으로 남깁니다.
+                </div>
+                <section>
+                    <h2>확인 결과 요약</h2>
+                    <div class="section">
+                        <div>거래처: <strong>{{ result.merchant_name or '-' }}</strong></div>
+                        <div>사용일: <strong>{{ result.date or '-' }}</strong></div>
+                        <div>총액: <strong>{{ "{:,.0f}".format(result.total_amount) }}</strong></div>
+                        <div class="warn">{% for note in result.review_notes %}{{ note }}<br>{% endfor %}</div>
+                    </div>
+                </section>
+            {% endif %}
+
+            <form method="post">
+                <input type="hidden" name="draft_json" value="{{ draft|tojson|safe }}">
+
+                <div class="section">
+                    <h2>문서 유형</h2>
+                    <div class="form-row">
+                        <label for="document_type">문서 유형</label>
+                        <select id="document_type" name="document_type">
+                            <option value="receipt" {% if draft.document_type == 'receipt' %}selected{% endif %}>영수증</option>
+                            <option value="cart" {% if draft.document_type == 'cart' %}selected{% endif %}>장바구니</option>
+                            <option value="budget" {% if draft.document_type == 'budget' %}selected{% endif %}>예산 현황</option>
+                            <option value="form_requirements" {% if draft.document_type == 'form_requirements' %}selected{% endif %}>양식 요구사항</option>
+                            <option value="other" {% if draft.document_type == 'other' %}selected{% endif %}>기타</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label for="merchant_name">거래처</label>
+                        <input type="text" id="merchant_name" name="merchant_name" value="{{ (draft.merchant_name or '') }}">
+                    </div>
+                    <div class="form-row">
+                        <label for="transaction_date">사용일</label>
+                        <input type="date" id="transaction_date" name="transaction_date" value="{{ (draft.date or '') }}">
+                    </div>
+                    <div class="form-row">
+                        <label for="total_amount">총액</label>
+                        <input type="number" id="total_amount" name="total_amount" step="0.01" value="{{ (draft.total_amount or 0) }}">
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>품목</h2>
+                    <div id="items">
+                        {% for item in (draft.get("items") or []) %}
+                            <div class="item-row">
+                                <input type="text" name="item_name" value="{{ item.item_name or '' }}" placeholder="품목명" style="flex:1; min-width:140px;">
+                                <input type="text" name="item_specification" value="{{ item.specification or '' }}" placeholder="규격/옵션" style="flex:1; min-width:120px;">
+                                <input type="number" name="item_quantity" step="0.01" value="{{ item.quantity or 0 }}" style="max-width:90px;">
+                                <input type="text" name="item_unit" value="{{ item.unit or '개' }}" style="max-width:90px;">
+                                <input type="number" name="item_unit_price" step="0.01" value="{{ item.unit_price or 0 }}" style="max-width:110px;">
+                                <input type="number" name="item_amount" step="0.01" value="{{ item.item_amount or 0 }}" style="max-width:110px;">
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <button type="button" class="btn btn-add" onclick="addItemRow()">품목 추가</button>
+                    <div class="warn">장바구니는 구매 예정 참고자료로 표시하고, 결제 증빙과 섞지 않습니다.</div>
+                </div>
+
+                <div class="form-row" style="margin-top:12px;">
+                    <label>
+                        <input type="checkbox" name="is_cart" value="yes" {% if draft.document_type == 'cart' %}checked{% endif %}> 장바구니 자료로 표시
+                    </label>
+                </div>
+
+                <div class="form-row" style="margin-top:16px;">
+                    <button type="button" class="btn" onclick="confirmReady()">확인 완료 처리</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function addItemRow() {
+            const container = document.getElementById('items');
+            const div = document.createElement('div');
+            div.className = 'item-row';
+            div.innerHTML = `
+                <input type="text" name="item_name" placeholder="품목명" style="flex:1; min-width:140px;">
+                <input type="text" name="item_specification" placeholder="규격/옵션" style="flex:1; min-width:120px;">
+                <input type="number" name="item_quantity" step="0.01" value="1" style="max-width:90px;">
+                <input type="text" name="item_unit" value="개" style="max-width:90px;">
+                <input type="number" name="item_unit_price" step="0.01" value="0" style="max-width:110px;">
+                <input type="number" name="item_amount" step="0.01" value="0" style="max-width:110px;">
+            `;
+            container.appendChild(div);
+        }
+        function confirmReady() {
+            alert('확인 완료 버튼은 이후 확정 상태 전환과 연결합니다. 지금은 저장 후 장부에서 상태를 바꿉니다.');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>증빙서류</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 150px; }
+        .form-row input[type="date"] { max-width: 170px; }
+        .form-section { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafbfc; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .btn-add { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+        .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
+    
+        .sheet { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+        .sheet h1 { font-size: 22px; text-align: center; margin: 0 0 16px; letter-spacing: 0.3em; }
+        table.info, table.items { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }
+        table.info th, table.info td, table.items th, table.items td { border: 1px solid #94a3b8; padding: 7px 10px; }
+        table.info th, table.items th { background: #f1f5f9; text-align: center; font-weight: 600; width: 14%; }
+        table.items th { width: auto; }
+        table.items td.n { text-align: right; white-space: nowrap; }
+        .original h2 { font-size: 15px; margin: 8px 0; }
+        .original img { max-width: 100%; max-height: 230mm; border: 1px solid #cbd5e1; display: block; margin: 0 auto; }
+        .original iframe { width: 100%; height: 700px; border: 1px solid #cbd5e1; }
+        .warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+        .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+        @media print {
+            @page { size: A4; margin: 14mm; }
+            body { background: #fff; }
+            .noprint { display: none !important; }
+            .wrap { max-width: none; padding: 0; }
+            .sheet { border: none; border-radius: 0; padding: 0; }
+            .original { page-break-inside: avoid; }
+            .print-only { display: block !important; }
+        }
+        .print-only { display: none; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="noprint">
+            {% include '_nav.html' %}
+            {% include '_flash.html' %}
+        </div>
+
+        {% set tx = overview.transaction %}
+        {% set files = detail['receipt_files'] %}
+        <div class="noprint">
+            <div class="toolbar">
+                <button type="button" class="btn btn-primary" onclick="window.print()">인쇄 (또는 PDF로 저장)</button>
+                {% for f in files %}
+                    <a class="btn" href="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id, download=1) }}">원본 파일 저장</a>
+                    <a class="btn" href="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" target="_blank" rel="noopener">원본만 열기</a>
+                {% endfor %}
+                <a class="btn" href="{{ url_for('routes.ledger') }}">장부로</a>
+            </div>
+            <p class="hint">인쇄 창에서 대상을 'PDF로 저장'으로 고르면 증빙서류를 PDF 파일로 만들 수 있습니다.</p>
+            {% if tx.status != '확정' %}
+                <div class="warn">아직 <strong>{{ tx.status }}</strong> 상태입니다. 확정한 뒤 출력하는 것을 권장합니다.</div>
+            {% endif %}
+        </div>
+
+        <div class="sheet">
+            <h1>증 빙 서 류</h1>
+            <table class="info">
+                <tr><th>예산</th><td>{{ tx.budget_name }}</td><th>사용일</th><td>{{ tx.transaction_date }}</td></tr>
+                <tr><th>거래처</th><td>{{ tx.merchant_name }}</td><th>총액</th><td>{{ tx.total_amount|money }}원</td></tr>
+                {% if overview.refunded_amount %}
+                <tr><th>환불</th><td>-{{ overview.refunded_amount|money }}원</td><th>실지출</th><td>{{ (tx.total_amount - overview.refunded_amount)|money }}원</td></tr>
+                {% endif %}
+                <tr><th>증빙 파일</th><td colspan="3">{% for f in files %}{{ f.file_name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not files %}-{% endif %}</td></tr>
+            </table>
+
+            <table class="items">
+                <thead><tr><th>번호</th><th>품목</th><th>규격</th><th>수량</th><th>단위</th><th>단가</th><th>금액</th></tr></thead>
+                <tbody>
+                {% for it in detail['items'] %}
+                    <tr>
+                        <td style="text-align:center;">{{ loop.index }}</td>
+                        <td>{{ it.item_name }}</td>
+                        <td>{{ it.specification or '' }}</td>
+                        <td class="n">{{ it.quantity|num }}</td>
+                        <td style="text-align:center;">{{ it.unit }}</td>
+                        <td class="n">{{ it.unit_price|money }}</td>
+                        <td class="n">{{ it.item_amount|money }}</td>
+                    </tr>
+                {% endfor %}
+                {% if not detail['items'] %}<tr><td colspan="7" style="text-align:center;">품목 정보 없음</td></tr>{% endif %}
+                </tbody>
+            </table>
+
+            {% for f in files %}
+                <div class="original">
+                    <h2>원본 증빙 · {{ f.file_name }}</h2>
+                    {% if f.file_name.lower().endswith('.pdf') %}
+                        <div class="noprint"><iframe src="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" title="원본 PDF"></iframe></div>
+                        <p class="hint noprint">PDF 원본은 이 화면 인쇄에 포함되지 않을 수 있습니다. '원본만 열기'로 열어서 따로 인쇄해 주세요.</p>
+                        <p class="print-only">원본 PDF 파일: {{ f.file_name }} (별도 첨부)</p>
+                    {% else %}
+                        <img src="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" alt="원본 영수증">
+                    {% endif %}
+                </div>
+            {% endfor %}
+            {% if not files %}<p class="hint">연결된 원본 파일이 없습니다.</p>{% endif %}
+        </div>
+    </div>
+</body>
+</html>

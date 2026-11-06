@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>교사용 예산·구매 서류 도우미</title>
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #1f2937;
+            --muted: #64748b;
+            --accent: #2563eb;
+            --accent-bg: #eef2ff;
+            --ok: #16a34a;
+            --warn: #d97706;
+            --bad: #dc2626;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+        .nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 8px 14px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: var(--text);
+            font-size: 14px;
+        }
+        .nav a:hover { background: var(--accent-bg); }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 16px;
+        }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        h2 { font-size: 16px; margin: 0 0 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px 10px; border: 1px solid var(--border); font-size: 14px; }
+        th { background: #f8fafc; }
+        .summary td { font-size: 14px; }
+        .summary .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .empty { color: var(--muted); padding: 18px; text-align: center; }
+        .alert {
+            padding: 12px 14px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: var(--bad); }
+        .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: var(--ok); }
+        .alert-warn { background: #fffbeb; border: 1px solid #fde68a; color: var(--warn); }
+        .btn {
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            color: var(--text);
+        }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-sm { padding: 5px 10px; font-size: 13px; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select, .form-row textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 160px; }
+        .form-section { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafbfc; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .page { padding-top: 6px; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <h1>예산별 잔액 요약</h1>
+            <p class="hint"> 배정액, 확정 지출, 환불, 잔액을 함께 봅니다.</p>
+            {% if summary %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>예산 분류</th>
+                            <th>연도</th>
+                            <th>구분</th>
+                            <th class="num">배정액</th>
+                            <th class="num">확정 지출</th>
+                            <th class="num">환불</th>
+                            <th class="num">잔액</th>
+                        </tr>
+                    </thead>
+                    <tbody class="summary">
+                        {% for row in summary %}
+                            <tr>
+                                <td>{{ row.budget_name }}</td>
+                                <td>{{ row.year }}</td>
+                                <td>{{ row.type }}</td>
+                                <td class="num">{{ "{:,.0f}".format(row.allocated_amount) }}</td>
+                                <td class="num">{{ "{:,.0f}".format(row.spent) }}</td>
+                                <td class="num">{{ "{:,.0f}".format(row.refunded) }}</td>
+                                <td class="num">{{ "{:,.0f}".format(row.balance) }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="empty">아직 등록된 예산이 없습니다. <a href="{{ url_for('routes.budget_create') }}">예산 등록</a></div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h2>빠른 이동</h2>
+            <a class="btn btn-primary" href="{{ url_for('routes.upload') }}">영수증 업로드</a>
+            <a class="btn" href="{{ url_for('routes.manual_entry') }}">수기 입력</a>
+            <a class="btn" href="{{ url_for('routes.budgets') }}">예산 관리</a>
+            <a class="btn" href="{{ url_for('routes.ledger') }}">지출 장부</a>
+        </div>
+    </div>
+</body>
+</html>

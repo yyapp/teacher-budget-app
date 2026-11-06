@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>예산 수정</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 12px; }
+        .form-row { margin-bottom: 14px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 160px; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+
+        {% include '_flash.html' %}
+        <div class="card">
+            <h1>예산 수정</h1>
+            <p class="hint"> 예산명과 배정액을 수정하면 예산 현황, 지출 장부 등 관련 화면에 바로 반영됩니다.</p>
+            <form method="post">
+                <div class="form-row">
+                    <label for="budget_name">예산명</label>
+                    <input type="text" id="budget_name" name="budget_name" value="{{ budget.budget_name }}" required>
+                </div>
+                <div class="form-row">
+                    <label for="year">연도</label>
+                    <input type="number" id="year" name="year" value="{{ budget.year }}" required min="2000" max="2100">
+                </div>
+                <div class="form-row">
+                    <label for="type">구분</label>
+                    <select id="type" name="type">
+                        <option value="확정" {% if budget.type == '확정' %}selected{% endif %}>확정</option>
+                        <option value="계획" {% if budget.type == '계획' %}selected{% endif %}>계획</option>
+                    </select>
+                    <div class="hint">확정과 계획 구분을 바꿨다고 기존 지출이 자동으로 바뀌지는 않습니다.</div>
+                </div>
+                <div class="form-row">
+                    <label for="allocated_amount">배정액</label>
+                    <input type="number" id="allocated_amount" name="allocated_amount" step="0.01" value="{{ "{:,.2f}".format(budget.allocated_amount) }}" required>
+                </div>
+                <div class="form-row">
+                    <label for="applied_date">적용일</label>
+                    <input type="date" id="applied_date" name="applied_date" value="{{ budget.applied_date or '' }}">
+                </div>
+                <button type="submit" class="btn btn-primary">수정</button>
+            </form>
+        </div>
+        <a class="btn" href="{{ url_for('routes.budgets') }}">목록으로 돌아가기</a>
+    </div>
+</body>
+</html>

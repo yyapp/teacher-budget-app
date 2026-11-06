@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>장바구니 검토</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff; --warn: #d97706;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        h2 { font-size: 16px; margin: 0 0 10px; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select, .form-row textarea {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 150px; }
+        .form-section { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafbfc; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .warn { color: var(--warn); font-size: 13px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .btn-add { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+        .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+        th { background: #f8fafc; }
+        .total-row { font-weight: bold; background: #f8fafc; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .empty { color: var(--muted); padding: 18px; text-align: center; }
+        .note { background: #fffbeb; border-left: 4px solid var(--warn); padding: 10px 14px; margin: 15px 0; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <h1>장바구니 검토</h1>
+            <p class="hint"> 구매 예정 품목을 미리 정리하고, 품의 코드 복사로 이어 갑니다. 이 자료는 결제 증빙이 아닙니다.</p>
+
+            <form method="post">
+                <div class="form-row">
+                    <label for="merchant_name">구매처</label>
+                    <input type="text" id="merchant_name" name="merchant_name" placeholder="예: 온라인몰, 문구점" value="{{ cart.merchant_name if cart and cart.merchant_name != '미확인' else '' }}">
+                </div>
+
+                <div class="form-row">
+                    <label for="document_date">문서 날짜</label>
+                    <input type="date" id="document_date" name="document_date" value="{{ cart.document_date if cart and cart.document_date != '미확인' else '' }}">
+                    <div class="hint">모르면 비워 두어도 됩니다.</div>
+                </div>
+
+                <div class="form-row">
+                    <label for="expected_total_amount">예상 총액</label>
+                    <input type="number" id="expected_total_amount" name="expected_total_amount" step="0.01" value="{{ cart.expected_total_amount if cart else '' }}">
+                </div>
+
+                <div class="form-row">
+                    <label for="shipping_fee">배송비</label>
+                    <input type="number" id="shipping_fee" name="shipping_fee" step="0.01" value="{{ cart.shipping_fee if cart and cart.shipping_fee else '' }}">
+                </div>
+
+                <div class="form-row">
+                    <label for="discount_terms">할인 조건</label>
+                    <input type="text" id="discount_terms" name="discount_terms" placeholder="예: 3만원 이상 무료배송" value="{{ cart.discount_terms if cart and cart.discount_terms else '' }}">
+                </div>
+
+                <div class="form-section">
+                    <h2>구매 예정 품목</h2>
+                    <div id="items">
+                        {% if cart and cart.get("items") %}
+                            {% for item in cart.get("items") %}
+                            <div class="item-row" style="margin-bottom:10px;">
+                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                    <input type="text" name="item_name" placeholder="품목명" value="{{ item.item_name }}" style="flex:1; min-width:140px;">
+                                    <input type="text" name="item_specification" placeholder="규격/옵션" value="{{ item.specification or '' }}" style="flex:1; min-width:120px;">
+                                    <input type="number" name="item_quantity" step="0.01" value="{{ item.quantity }}" style="max-width:90px;">
+                                    <input type="text" name="item_unit" value="{{ item.unit or '개' }}" style="max-width:90px;">
+                                    <input type="number" name="item_unit_price" step="0.01" value="{{ item.unit_price }}" style="max-width:110px;">
+                                    <input type="number" name="item_amount" step="0.01" value="{{ item.item_amount }}" style="max-width:110px;">
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="item-row" style="margin-bottom:10px;">
+                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                    <input type="text" name="item_name" placeholder="품목명" style="flex:1; min-width:140px;">
+                                    <input type="text" name="item_specification" placeholder="규격/옵션" style="flex:1; min-width:120px;">
+                                    <input type="number" name="item_quantity" step="0.01" value="1" style="max-width:90px;">
+                                    <input type="text" name="item_unit" value="개" style="max-width:90px;">
+                                    <input type="number" name="item_unit_price" step="0.01" value="0" style="max-width:110px;">
+                                    <input type="number" name="item_amount" step="0.01" value="0" style="max-width:110px;">
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                    <button type="button" class="btn btn-add" onclick="addItemRow()">품목 추가</button>
+                    <div class="warn">추천·광고 상품은 제외하고, 선택 여부가 불명확한 품목은 따로 표시해 주세요.</div>
+                </div>
+
+                <div class="note">
+                    <strong>참고:</strong> 이 자료는 장바구니 캡처 기반의 구매 예정 참고자료이며, 결제 증빙이 아닙니다.
+                    실제 구매 예정인 품목만 품의에 포함하세요.
+                </div>
+
+                <button type="submit" class="btn btn-primary">저장 후 품의 코드 복사로 이동</button>
+                <a class="btn" href="{{ url_for('routes.upload') }}">영수증 업로드로 돌아가기</a>
+            </form>
+        </div>
+
+        {% if cart and cart.get("items") %}
+        <div class="card">
+            <h2>현재 장바구니 요약</h2>
+            {% if cart.get("items") %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>품목명</th>
+                        <th>규격/옵션</th>
+                        <th>수량</th>
+                        <th>단위</th>
+                        <th class="num">단가</th>
+                        <th class="num">금액</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in cart.get("items") %}
+                    <tr>
+                        <td>{{ item.item_name }}</td>
+                        <td>{{ item.specification or '-' }}</td>
+                        <td>{{ item.quantity }}</td>
+                        <td>{{ item.unit or '개' }}</td>
+                        <td class="num">{{ "{:,.0f}".format(item.unit_price) }}원</td>
+                        <td class="num">{{ "{:,.0f}".format(item.item_amount) }}원</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="total-row">
+                        <td colspan="5">예상 총액</td>
+                        <td class="num">{{ "{:,.0f}".format(cart.expected_total_amount or 0) }}원</td>
+                    </tr>
+                </tbody>
+            </table>
+            {% if cart.shipping_fee %}
+            <p style="margin-top:8px;">배송비: {{ "{:,.0f}".format(cart.shipping_fee) }}원</p>
+            {% endif %}
+            {% if cart.discount_terms %}
+            <p style="margin-top:8px;">할인 조건: {{ cart.discount_terms }}</p>
+            {% endif %}
+            {% else %}
+            <div class="empty">품목 정보가 없습니다.</div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function addItemRow() {
+            const container = document.getElementById('items');
+            const div = document.createElement('div');
+            div.className = 'item-row';
+            div.style.marginBottom = '10px';
+            div.innerHTML = `
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <input type="text" name="item_name" placeholder="품목명" style="flex:1; min-width:140px;">
+                    <input type="text" name="item_specification" placeholder="규격/옵션" style="flex:1; min-width:120px;">
+                    <input type="number" name="item_quantity" step="0.01" value="1" style="max-width:90px;">
+                    <input type="text" name="item_unit" value="개" style="max-width:90px;">
+                    <input type="number" name="item_unit_price" step="0.01" value="0" style="max-width:110px;">
+                    <input type="number" name="item_amount" step="0.01" value="0" style="max-width:110px;">
+                </div>
+            `;
+            container.appendChild(div);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>거래 확인</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 150px; }
+        .form-row input[type="date"] { max-width: 170px; }
+        .form-section { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafbfc; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .btn-add { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+        .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
+    
+        .review { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }
+        @media (max-width: 900px) { .review { grid-template-columns: 1fr; } }
+        .preview { position: sticky; top: 12px; }
+        .preview img { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
+        .preview iframe { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 8px; }
+        .items-head, .item-row-grid { display: grid; grid-template-columns: 2.2fr 1.2fr 0.8fr 0.7fr 1fr 1.1fr; gap: 6px; align-items: center; }
+        .items-head { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+        .item-row-grid { margin-bottom: 6px; }
+        .item-row-grid input { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+        .num { text-align: right; }
+        .sum-box { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #f1f5f9; font-size: 14px; }
+        .sum-warn { color: #b45309; }
+        .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+        .btn-confirm { background: #16a34a; color: #fff; border-color: #16a34a; font-weight: 600; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #fffbeb; color: #92400e; }
+        .badge-ok { background: #dcfce7; color: #166534; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+        {% include '_flash.html' %}
+
+        {% set tx = detail.transaction %}
+        <div class="card">
+            <h1>{{ '인식 결과 확인' if is_new else '거래 수정' }}
+                <span class="badge {{ 'badge-ok' if tx.status == '확정' else '' }}">{{ tx.status }}</span></h1>
+            <p class="hint">
+                {% if is_new %}자동으로 읽은 결과입니다. 원본과 비교해 틀린 곳을 고친 뒤 <strong>확정</strong>을 누르세요. 확정하기 전에는 예산 잔액에 반영되지 않습니다.
+                {% else %}고친 뒤 저장하세요. 확정된 거래의 금액을 바꾸면 예산 잔액도 바로 달라집니다.{% endif %}
+            </p>
+        </div>
+
+        <div class="review">
+            <div class="card preview">
+                <h2 style="font-size:16px; margin:0 0 8px;">원본 파일</h2>
+                {% for f in detail['receipt_files'] %}
+                    {% if f.file_name.lower().endswith('.pdf') %}
+                        <iframe src="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" title="원본 PDF"></iframe>
+                    {% else %}
+                        <img src="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" alt="원본 영수증">
+                    {% endif %}
+                    <div class="hint" style="margin-top:6px;">저장 파일명: <strong>{{ f.file_name }}</strong><br>저장하면 <strong>예산명_일자_거래처</strong>로 파일 이름이 자동으로 바뀝니다.<br>
+                        <a href="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" target="_blank" rel="noopener">새 창에서 크게 보기</a> ·
+                        <a href="{{ url_for('routes.transaction_evidence', transaction_id=tx.transaction_id) }}" target="_blank" rel="noopener">증빙서류 출력</a></div>
+                {% endfor %}
+                {% if not detail['receipt_files'] %}<p class="hint">연결된 원본 파일이 없습니다.</p>{% endif %}
+            </div>
+
+            <div class="card">
+                <form method="post">
+                    <div class="form-row">
+                        <label for="budget_id">예산</label>
+                        <select id="budget_id" name="budget_id">
+                            {% for b in budgets %}
+                                <option value="{{ b.budget_id }}" {% if b.budget_id == tx.budget_id %}selected{% endif %}>{{ b.budget_name }} ({{ b.year }}년, {{ b.type }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label for="merchant_name">거래처</label>
+                        <input type="text" id="merchant_name" name="merchant_name" value="{{ tx.merchant_name }}" required>
+                    </div>
+                    <div class="form-row">
+                        <label for="transaction_date">사용일</label>
+                        <input type="date" id="transaction_date" name="transaction_date" value="{{ tx.transaction_date if tx.transaction_date != '미확인' else '' }}">
+                        <div class="hint">비워 두면 '미확인'으로 저장됩니다.</div>
+                    </div>
+
+                    <div class="form-section">
+                        <h2 style="font-size:16px; margin:0 0 8px;">품목</h2>
+                        <div class="items-head"><span>품목명</span><span>규격</span><span class="num">수량</span><span>단위</span><span class="num">단가</span><span class="num">금액</span></div>
+                        <div id="items">
+                        {% for it in detail['items'] %}
+                            <div class="item-row-grid">
+                                <input type="text" name="item_name" placeholder="품목명" value="{{ it.item_name or '' }}">
+                                <input type="text" name="item_specification" placeholder="규격/옵션" value="{{ it.specification or '' }}">
+                                <input type="number" class="num js-qty" name="item_quantity" step="any" min="0" value="{{ it.quantity|num if it.quantity is not none else 1 }}">
+                                <input type="text" name="item_unit" value="{{ it.unit or '개' }}">
+                                <input type="number" class="num js-price" name="item_unit_price" step="any" min="0" value="{{ it.unit_price|num if it.unit_price is not none else 0 }}">
+                                <input type="number" class="num js-amount" name="item_amount" step="any" min="0" value="{{ it.item_amount|num if it.item_amount is not none else 0 }}">
+                            </div>
+                        {% endfor %}
+                        {% if not detail['items'] %}
+                            {% set it = {'item_name': '', 'specification': '', 'quantity': 1, 'unit': '개', 'unit_price': 0, 'item_amount': 0} %}
+                            <div class="item-row-grid">
+                                <input type="text" name="item_name" placeholder="품목명" value="{{ it.item_name or '' }}">
+                                <input type="text" name="item_specification" placeholder="규격/옵션" value="{{ it.specification or '' }}">
+                                <input type="number" class="num js-qty" name="item_quantity" step="any" min="0" value="{{ it.quantity|num if it.quantity is not none else 1 }}">
+                                <input type="text" name="item_unit" value="{{ it.unit or '개' }}">
+                                <input type="number" class="num js-price" name="item_unit_price" step="any" min="0" value="{{ it.unit_price|num if it.unit_price is not none else 0 }}">
+                                <input type="number" class="num js-amount" name="item_amount" step="any" min="0" value="{{ it.item_amount|num if it.item_amount is not none else 0 }}">
+                            </div>
+                        {% endif %}
+                        </div>
+                        <button type="button" class="btn btn-add" onclick="addItemRow()">품목 추가</button>
+                        <div class="sum-box">
+                            품목 금액 합계 <strong id="items_sum">0</strong>원
+                            <span id="sum_warn" class="sum-warn" style="display:none;"> · 총액과 다릅니다 (배송비·할인이 있으면 정상일 수 있습니다)</span>
+                            <button type="button" class="btn" id="use_sum" style="margin-left:8px; padding:4px 10px; font-size:13px;">합계를 총액으로</button>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <label for="total_amount">총액 (원)</label>
+                        <input type="number" id="total_amount" name="total_amount" step="any" min="0" value="{{ tx.total_amount|num }}" required class="num" style="max-width:200px;">
+                    </div>
+
+                    <div class="actions">
+                        {% if tx.status != '확정' %}<button type="submit" name="action" value="confirm" class="btn btn-confirm">확정</button>{% endif %}
+                        <button type="submit" name="action" value="save" class="btn btn-primary">{{ '임시 저장' if tx.status != '확정' else '저장' }}</button>
+                        <a class="btn" href="{{ url_for('routes.ledger') }}">장부로</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ROW = `
+                            <div class="item-row-grid">
+                                <input type="text" name="item_name" placeholder="품목명" value="">
+                                <input type="text" name="item_specification" placeholder="규격/옵션" value="">
+                                <input type="number" class="num js-qty" name="item_quantity" step="any" min="0" value="1">
+                                <input type="text" name="item_unit" value="개">
+                                <input type="number" class="num js-price" name="item_unit_price" step="any" min="0" value="0">
+                                <input type="number" class="num js-amount" name="item_amount" step="any" min="0" value="0">
+                            </div>`;
+        const $ = (s, r = document) => r.querySelector(s);
+        const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+        const fmt = n => Math.round(n).toLocaleString('ko-KR');
+
+        function refreshSum() {
+            const sum = $$('.js-amount').reduce((a, el) => a + (parseFloat(el.value) || 0), 0);
+            $('#items_sum').textContent = fmt(sum);
+            const total = parseFloat($('#total_amount').value) || 0;
+            $('#sum_warn').style.display = (sum > 0 && Math.abs(sum - total) > 0.5) ? 'inline' : 'none';
+            return sum;
+        }
+        function bindRow(row) {
+            const qty = $('.js-qty', row), price = $('.js-price', row), amount = $('.js-amount', row);
+            const recalc = () => { amount.value = Math.round((parseFloat(qty.value) || 0) * (parseFloat(price.value) || 0) * 100) / 100; refreshSum(); };
+            qty.addEventListener('input', recalc);
+            price.addEventListener('input', recalc);
+            amount.addEventListener('input', refreshSum);
+        }
+        function addItemRow() {
+            const wrap = document.createElement('div');
+            wrap.innerHTML = ROW.trim();
+            const row = wrap.firstElementChild;
+            $('#items').appendChild(row);
+            bindRow(row);
+        }
+        $$('.item-row-grid').forEach(bindRow);
+        $('#total_amount').addEventListener('input', refreshSum);
+        $('#use_sum').addEventListener('click', () => { $('#total_amount').value = Math.round(refreshSum() * 100) / 100; refreshSum(); });
+        refreshSum();
+    </script>
+</body>
+</html>

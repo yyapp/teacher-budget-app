@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+*.egg
+
+# local db
+data/app.db
+data/*.db
+
+# storage files
+storage/
+!storage/.gitkeep
+
+# server log
+server.log
+
+# test image
+*.png
+test_receipt.png
+
+# secret/env for local test only
+.env
+.env.*
+!.env.example
+
+# pycache inside app
+app/__pycache__/

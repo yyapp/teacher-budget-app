@@ -1,0 +1,15 @@
+{# 모든 화면 공통 메뉴. 메뉴를 바꿀 때는 이 파일 하나만 고치면 된다. #}
+{% set menu = [
+    ('routes.index', '예산 현황'),
+    ('routes.budgets', '예산 관리'),
+    ('routes.upload', '영수증 업로드'),
+    ('routes.cart_review', '장바구니 검토'),
+    ('routes.manual_entry', '수기 입력'),
+    ('routes.ledger', '지출 장부'),
+    ('routes.cart_proposal', '품의 코드 복사'),
+] %}
+<nav class="nav">
+    {% for endpoint, label in menu %}
+        <a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} style="background:#eef2ff; border-color:#2563eb;" aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+</nav>

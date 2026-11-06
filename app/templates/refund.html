@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>환불 기록</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        .form-row { margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        .form-row input, .form-row select {
+            width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row input[type="number"] { max-width: 150px; }
+        .form-row input[type="date"] { max-width: 170px; }
+        .form-section { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafbfc; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .btn-add { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+        .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+        .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+
+        {% include '_flash.html' %}
+
+        {% set tx = overview.transaction %}
+        <div class="card">
+            <h1>환불 기록</h1>
+            <p class="hint">반품·취소로 돈이 돌아온 경우 기록합니다. 기록하면 예산 잔액이 그만큼 늘어납니다.</p>
+            <p><strong>{{ tx.merchant_name }}</strong> · {{ tx.transaction_date }} · {{ tx.budget_name }}</p>
+            <p>사용 금액 {{ "{:,.0f}".format(overview.allocated_amount) }}원 ·
+               환불 완료 {{ "{:,.0f}".format(overview.refunded_amount) }}원 ·
+               <strong>환불 가능 {{ "{:,.0f}".format(overview.refundable_amount) }}원</strong></p>
+
+            {% if tx.status != '확정' %}
+                <div class="alert alert-error">확정된 거래만 환불할 수 있습니다. 지출 장부에서 먼저 확정해 주세요.</div>
+            {% elif overview.refundable_amount <= 0 %}
+                <div class="alert alert-error">이미 전액 환불되었습니다.</div>
+            {% else %}
+                <form method="post">
+                    <div class="form-row">
+                        <label for="refund_date">환불일</label>
+                        <input type="date" id="refund_date" name="refund_date">
+                    </div>
+                    <div class="form-row">
+                        <label for="refund_amount">환불 금액 (원)</label>
+                        <input type="number" id="refund_amount" name="refund_amount" min="1" max="{{ overview.refundable_amount|int }}" step="1" value="{{ overview.refundable_amount|int }}" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">환불 기록</button>
+                    <a class="btn" href="{{ url_for('routes.ledger') }}">장부로</a>
+                </form>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h1>환불 내역</h1>
+            {% if overview.refunds %}
+                {% for rf in overview.refunds %}
+                    <form method="post" action="{{ url_for('routes.refund_cancel', refund_id=rf.refund_id) }}" style="display:flex; gap:10px; align-items:center; margin-bottom:8px;">
+                        <span>{{ rf.refund_date }} · {{ "{:,.0f}".format(rf.refund_amount) }}원 · {{ rf.status }}</span>
+                        {% if rf.status == '완료' %}<button type="submit" class="btn" onclick="return confirm('이 환불을 취소할까요?');">환불 취소</button>{% endif %}
+                    </form>
+                {% endfor %}
+            {% else %}
+                <p class="hint">환불 내역이 없습니다.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

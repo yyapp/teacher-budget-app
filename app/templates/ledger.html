@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>지출 장부</title>
+    <style>
+        :root {
+            --bg: #f5f7fb; --card: #ffffff; --border: #e2e8f0; --text: #1f2937;
+            --muted: #64748b; --accent: #2563eb; --accent-bg: #eef2ff;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+        .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px; }
+        .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+        .nav a { background: var(--card); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 14px; }
+        .nav a:hover { background: var(--accent-bg); }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        h2 { font-size: 16px; margin: 0 0 10px; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+        .form-row input, .form-row select {
+            padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff;
+        }
+        .form-row select { max-width: 220px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px 10px; border: 1px solid var(--border); font-size: 14px; }
+        th { background: #f8fafc; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .empty { color: var(--muted); padding: 18px; text-align: center; }
+        .hint { color: var(--muted); font-size: 12px; }
+        .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; text-decoration: none; color: var(--text); }
+        .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .item-list { margin-top: 6px; }
+        .item-list .item { font-size: 13px; color: var(--muted); margin-bottom: 2px; }
+        .item-list .item strong { color: var(--text); }
+        .file-links { font-size: 12px; color: var(--muted); }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; background: #f1f5f9; }
+        .status-확정 { background: #dcfce7; color: #166534; }
+        .status-임시 { background: #fffbeb; color: #92400e; }
+        .status-취소 { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        {% include '_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}" style="padding:10px 14px; margin-bottom:10px; border-radius:6px; background:{{ '#fee2e2' if category == 'error' else '#dcfce7' }};">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <h1>지출 장부</h1>
+            <p class="hint"> 예산별로 조회하고, 마지막에 총액·잔액 요약을 함께 봅니다.</p>
+
+            <div class="toolbar">
+                <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <label for="budget_id">예산 필터</label>
+                    <select id="budget_id" name="budget_id">
+                        <option value="">전체</option>
+                        {% for b in budgets %}
+                            <option value="{{ b.budget_id }}" {% if filter_budget == b.budget_id %}selected{% endif %}>{{ b.budget_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-primary">적용</button>
+                </form>
+                <a class="btn" href="{{ url_for('routes.upload') }}">영수증 업로드</a>
+                <a class="btn" href="{{ url_for('routes.manual_entry') }}">수기 입력</a>
+            </div>
+
+            {% if rows %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>거래 ID</th>
+                            <th>일자</th>
+                            <th>거래처</th>
+                            <th>예산명</th>
+                            <th class="num">총액</th>
+                            <th>상태</th>
+                            <th>품목</th>
+                            <th>증빙</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in rows %}
+                            <tr>
+                                <td style="font-size:12px;">{{ r.transaction_id[:12] }}…</td>
+                                <td>{{ r.transaction_date or '-' }}</td>
+                                <td>{{ r.merchant_name }}</td>
+                                <td>{{ r.budget_name }}</td>
+                                <td class="num">{{ "{:,.0f}".format(r.total_amount) }}{% if r.refunded_amount %}<div style="font-size:12px; color:#b45309;">환불 -{{ "{:,.0f}".format(r.refunded_amount) }}</div>{% endif %}</td>
+                                <td>
+                                    <span class="status-badge status-{{ r.status }}">{{ r.status }}</span>
+                                    <form method="post" action="{{ url_for('routes.transaction_status', transaction_id=r.transaction_id) }}" style="margin-top:6px; display:flex; gap:4px; flex-wrap:wrap;">
+                                        <input type="hidden" name="budget_id" value="{{ filter_budget }}">
+                                        {% if r.status != '확정' %}<button type="submit" name="status" value="확정" class="btn btn-primary">확정</button>{% endif %}
+                                        {% if r.status == '확정' %}<button type="submit" name="status" value="임시" class="btn">임시로</button>{% endif %}
+                                        {% if r.status == '확정' %}<a class="btn" href="{{ url_for('routes.refund_new', transaction_id=r.transaction_id) }}">환불</a>{% endif %}
+                                        <a class="btn" href="{{ url_for('routes.transaction_edit', transaction_id=r.transaction_id) }}">수정</a>
+                                        {% if r.status != '취소' %}<button type="submit" name="status" value="취소" class="btn" onclick="return confirm('이 거래를 취소할까요?');">취소</button>{% endif %}
+                                    </form>
+                                </td>
+                                <td>
+                                    <div class="item-list">
+                                        {% for i in r["items"] %}
+                                            <div class="item">
+                                                <strong>{{ i.item_name }}</strong>
+                                                {% if i.specification %} ({{ i.specification }}){% endif %}
+                                                · {{ i.quantity|num }} {{ i.unit }} · 단가 {{ "{:,.0f}".format(i.unit_price) }} · 금액 {{ "{:,.0f}".format(i.item_amount) }}
+                                            </div>
+                                        {% endfor %}
+                                        {% if not r["items"] %}
+                                            <div class="item">품목 없음</div>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if r.status != '확정' %}
+                                    <form method="post" action="{{ url_for('routes.transaction_delete', transaction_id=r.transaction_id) }}" style="margin-bottom:6px;">
+                                        <button type="submit" class="btn" style="color:#b91c1c;" onclick="return confirm('이 거래와 증빙 파일을 완전히 삭제합니다. 되돌릴 수 없습니다. 삭제할까요?');">삭제</button>
+                                    </form>
+                                    {% endif %}
+                                    <div style="margin-bottom:6px;"><a class="btn" href="{{ url_for('routes.transaction_evidence', transaction_id=r.transaction_id) }}" target="_blank" rel="noopener">증빙 출력</a></div>
+                                    <div class="file-links">
+                                        {% for f in r.receipt_files %}
+                                            <a href="{{ url_for('routes.receipt_file_view', receipt_id=f.receipt_id) }}" target="_blank" rel="noopener">{{ f.file_type }}: {{ f.file_name }}</a><br>
+                                        {% endfor %}
+                                        {% if not r.receipt_files %}
+                                            -
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="empty">등록된 거래가 없습니다.</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
