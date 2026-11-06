@@ -301,6 +301,55 @@ c.post(f"/transactions/{tP}/delete")
 res.append(ok("삭제 시 이름 바뀐 증빙 파일도 삭제", not os.path.exists(pathP)))
 del os.environ["UPSTAGE_API_KEY"]
 
+
+# ---------------- 접속 비밀번호(시연용 공개) ----------------
+import app.auth as auth
+os.environ["APP_ACCESS_PASSWORD"] = "test-pass-123"   # 시험용 값. 실제 비밀번호는 코드·저장소에 두지 않는다.
+auth.reset_for_tests()
+anon = m.app.test_client()
+for method, path in (("get", "/"), ("get", "/ledger"), ("get", "/api/balance"), ("get", f"/transactions/{tid2}/evidence"), ("get", f"/receipts/{rA}/file"), ("post", "/upload"), ("post", f"/transactions/{tid2}/delete")):
+    r = getattr(anon, method)(path)
+    res.append(ok(f"비밀번호 설정 시 로그인 없이 {method.upper()} {path.split(tid2)[0]} 차단", r.status_code == 302 and "/login" in r.headers["Location"]))
+res.append(ok("로그인 화면 표시", anon.get("/login").status_code == 200 and has(anon.get("/login"), "접속 비밀번호")))
+r = anon.post("/login", data={"password": "wrong"})
+res.append(ok("틀린 비밀번호 거부", r.status_code == 401 and has(r, "맞지 않습니다") and anon.get("/ledger").status_code == 302))
+r = anon.post("/login", data={"password": "test-pass-123", "next": "/ledger"})
+res.append(ok("맞는 비밀번호 → 원래 가려던 화면", r.status_code == 302 and r.headers["Location"].endswith("/ledger")))
+page = anon.get("/ledger")
+res.append(ok("로그인 후 접근·로그아웃 메뉴·캐시 금지", page.status_code == 200 and has(page, "로그아웃") and page.headers.get("Cache-Control") == "no-store"))
+res.append(ok("로그인 후 API·증빙도 열림", anon.get("/api/balance").status_code == 200 and anon.get(f"/receipts/{rA}/file").status_code == 200))
+r = m.app.test_client().post("/login", data={"password": "test-pass-123", "next": "//evil.example/x"})
+res.append(ok("외부 주소로 보내는 next는 무시", r.status_code == 302 and "evil.example" not in r.headers["Location"]))
+anon.get("/logout")
+res.append(ok("로그아웃 후 다시 차단", anon.get("/ledger").status_code == 302))
+# 시도 횟수 제한
+auth.reset_for_tests()
+bad = m.app.test_client()
+codes = [bad.post("/login", data={"password": f"x{i}"}, headers={"CF-Connecting-IP": "1.1.1.1"}).status_code for i in range(5)]
+res.append(ok(f"5번 틀리면 잠김 {codes}", codes == [401] * 5 and bad.post("/login", data={"password": "test-pass-123"}, headers={"CF-Connecting-IP": "1.1.1.1"}).status_code == 429))
+res.append(ok("잠긴 접속자는 맞는 비밀번호도 거부", bad.get("/ledger").status_code == 302))
+res.append(ok("다른 접속자는 영향 없음", m.app.test_client().post("/login", data={"password": "test-pass-123"}, headers={"CF-Connecting-IP": "2.2.2.2"}).status_code == 302))
+auth.reset_for_tests()
+for i in range(10):
+    for j in range(5):
+        m.app.test_client().post("/login", data={"password": "x"}, headers={"CF-Connecting-IP": f"9.9.9.{i}"})
+res.append(ok("전체 시도가 너무 많으면 모두 잠김", m.app.test_client().post("/login", data={"password": "test-pass-123"}, headers={"CF-Connecting-IP": "3.3.3.3"}).status_code == 429))
+auth.reset_for_tests()
+del os.environ["APP_ACCESS_PASSWORD"]
+res.append(ok("비밀번호 설정이 없으면 로그인 없이 동작", m.app.test_client().get("/").status_code == 200 and m.app.test_client().get("/login").status_code == 302))
+res.append(ok("로그인 꺼짐 상태엔 로그아웃 메뉴 없음", not has(m.app.test_client().get("/"), "로그아웃")))
+
+# ---------------- 자동 인식 호출 한도(시연용 비용 보호) ----------------
+os.environ["UPSTAGE_API_KEY"] = "test-key"; os.environ["OCR_MAX_CALLS"] = "1"; rt._ocr_calls = 0
+rt.parse_receipt_image = fake_ok
+calls.clear()
+upload((io.BytesIO(PNG), "cap1.png")); first = latest()
+r = upload((io.BytesIO(PNG), "cap2.png"))
+page = c.get(r.headers["Location"], follow_redirects=True)
+res.append(ok("한도 안에서는 인식, 넘으면 직접 입력 안내", len(calls) == 1 and has(page, "사용 한도") and latest()[2] == "미확인 거래처"))
+for k in ("UPSTAGE_API_KEY", "OCR_MAX_CALLS"): del os.environ[k]
+rt._ocr_calls = 0
+
 # ---------------- 공통 메뉴 ----------------
 menu_labels = ("예산 현황", "예산 관리", "영수증 업로드", "장바구니 검토", "수기 입력", "지출 장부", "품의 코드 복사")
 nav_pages = ["/", "/budgets", "/budgets/create", f"/budgets/{bid}/edit", "/upload", "/manual-entry", "/ledger", "/cart-review", "/cart-proposal",

@@ -12,4 +12,5 @@
     {% for endpoint, label in menu %}
         <a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} style="background:#eef2ff; border-color:#2563eb;" aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
+    {% if auth_enabled %}<a href="{{ url_for('auth.logout') }}" style="margin-left:auto;">로그아웃</a>{% endif %}
 </nav>

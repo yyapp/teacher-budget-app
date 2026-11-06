@@ -119,11 +119,19 @@ def budget_edit(budget_id):
     return render_template("budget_edit.html", budget=dict(row))
 
 
+_ocr_calls = 0  # 프로그램을 켠 뒤 자동 인식을 부른 횟수 (OCR_MAX_CALLS로 상한을 둘 수 있음)
+
+
 def _recognize_receipt(file_content: bytes):
     """파일을 자동 인식한다. (인식 결과 dict 또는 None, 사용자에게 보여 줄 오류 문구 또는 None)"""
+    global _ocr_calls
     api_key = os.environ.get("UPSTAGE_API_KEY", "").strip()
     if not api_key:
         return None, "자동 인식용 API 키가 설정되지 않았습니다. 아래에서 직접 입력해 주세요."
+    limit = os.environ.get("OCR_MAX_CALLS", "").strip()
+    if limit.isdigit() and _ocr_calls >= int(limit):
+        return None, "시연용 자동 인식 사용 한도에 도달했습니다. 아래에서 직접 입력해 주세요."
+    _ocr_calls += 1
     parsed = parse_receipt_image(file_content, api_key)
     if not parsed.get("ok"):
         return None, f"자동 인식에 실패했습니다. 아래에서 직접 입력해 주세요. ({parsed.get('error')})"

@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import Flask, flash, redirect, url_for
 
 from app.forms import MAX_UPLOAD_BYTES
+from app.auth import init_auth
 from app.routes import routes_bp
 
 def _load_dotenv(path: Path) -> None:
@@ -30,6 +31,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "local-dev-secret-change-me")
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 2 * 1024 * 1024  # 폼 여유분 포함
 app.register_blueprint(routes_bp)
+init_auth(app)
 
 
 @app.errorhandler(413)
