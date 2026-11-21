@@ -12,6 +12,81 @@ from supabase_app import storage
 
 
 class UploadAttachmentTests(unittest.TestCase):
+    def test_receipt_review_cancel_discards_parse_and_temp_evidence(self):
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.list_budgets",
+                return_value=[{"id": "budget-id", "name": "학급비"}],
+            ),
+            patch("supabase_app.routes.storage_delete") as delete,
+        ):
+            client = app.test_client()
+            with client.session_transaction() as state:
+                state["pending_receipt"] = {
+                    "receipt_path": "raw/temp/receipt.jpg",
+                    "additional_document_path": "raw/temp/statement.pdf",
+                    "items": [],
+                    "amount": 0,
+                    "total_difference": None,
+                    "items_total": 0,
+                    "receipt_filename": "receipt.jpg",
+                    "additional_document_filename": "statement.pdf",
+                    "budget_id": "budget-id",
+                }
+
+            review_page = client.get("/upload")
+            self.assertIn("파싱 결과 버리기 · 초기화".encode(), review_page.data)
+            response = client.post("/upload", data={"action": "cancel"})
+
+            with client.session_transaction() as state:
+                self.assertNotIn("pending_receipt", state)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            {call.args[0] for call in delete.call_args_list},
+            {"raw/temp/receipt.jpg", "raw/temp/statement.pdf"},
+        )
+
+    def test_cart_review_cancel_discards_only_unsaved_parse(self):
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.list_budgets",
+                return_value=[{"id": "budget-id", "name": "학급비"}],
+            ),
+        ):
+            client = app.test_client()
+            with client.session_transaction() as state:
+                state["cart_image_review"] = {
+                    "budget_id": "budget-id",
+                    "items": [],
+                    "items_total": 0,
+                    "receipt_total": None,
+                    "total_source": "items_estimate",
+                    "cart_summary": {
+                        "products_subtotal": None,
+                        "shipping": None,
+                        "discount": None,
+                        "payable": None,
+                        "calculated_payable": None,
+                        "discount_seen": False,
+                        "products_status": "unavailable",
+                        "payable_status": "unavailable",
+                    },
+                }
+                state["unrelated"] = "keep"
+
+            review_page = client.get("/cart-review")
+            self.assertIn("파싱 결과 버리기 · 초기화".encode(), review_page.data)
+            response = client.post("/cart-review", data={"action": "cancel"})
+
+            with client.session_transaction() as state:
+                self.assertNotIn("cart_image_review", state)
+                self.assertEqual(state["unrelated"], "keep")
+
+        self.assertEqual(response.status_code, 302)
+
     def test_transaction_items_and_extra_evidence_use_existing_notes_column(self):
         class InsertQuery:
             def __init__(self, captured):

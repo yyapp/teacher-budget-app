@@ -263,7 +263,13 @@ def upload() -> Any:
         pending = session.get("pending_receipt")
 
         if action == "cancel":
-            session.pop("pending_receipt", None)
+            pending = session.pop("pending_receipt", None) or {}
+            for path in (
+                pending.get("receipt_path"),
+                pending.get("additional_document_path"),
+            ):
+                if path:
+                    storage_delete(path)
             return redirect(url_for("app.upload"))
 
         if action == "save":
