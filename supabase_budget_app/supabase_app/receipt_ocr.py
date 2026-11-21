@@ -1,5 +1,7 @@
 """Upstage OCR client and receipt-field extraction."""
 
+import base64
+import json
 import os
 import re
 from datetime import date
@@ -457,6 +459,7 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
         and summary["products_subtotal"] is not None
         and summary["shipping"] is not None
         and summary["payable"] is not None
+        and summary["products_subtotal"] + summary["shipping"] == summary["payable"]
     ):
         # This order summary exposes all payable components but has no discount row.
         summary["discount"] = 0
@@ -559,7 +562,264 @@ def parse_receipt(
 def parse_cart_image(
     file_bytes: bytes, filename: str, content_type: str
 ) -> dict[str, Any]:
-    """Send a pre-purchase cart image to OCR and extract cart-only fields."""
-    return extract_cart_fields(
-        _request_document_text(file_bytes, filename, content_type)
+    """Extract cart rows from the full image with visual context, then OCR fallback."""
+    api_key = os.environ.get("UPSTAGE_API_KEY", "").strip()
+    if api_key:
+        schema = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {
+                                "type": "string",
+                                "description": "상품 고유 이름만. 메뉴, 버튼, 장바구니/요약 라벨은 넣지 않는다.",
+                            },
+                            "option": {
+                                "type": "string",
+                                "description": "색상, 사이즈 등 상품 옵션. 없으면 빈 문자열.",
+                            },
+                            "package_size": {
+                                "type": "string",
+                                "description": "20개입, 144g처럼 상품 포장 규격. 주문 수량과 구분하며 없으면 빈 문자열.",
+                            },
+                            "order_quantity": {
+                                "type": "string",
+                                "description": "구매 주문 수량. 포장 규격 숫자가 아니라 실제 주문 수량. 불명확하면 빈 문자열.",
+                            },
+                            "unit_price": {
+                                "type": "string",
+                                "description": "시각적으로 단가라고 표시된 가격. 굵은 행 금액만 보이면 그 금액을 단가로 복사하지 말고 계산 또는 빈 문자열.",
+                            },
+                            "item_amount": {
+                                "type": "string",
+                                "description": "해당 상품 행 전체 금액. 굵게 표시된 행 합계가 있으면 그것을 사용하며 주문 수량을 다시 곱하지 않는다. 불명확하면 빈 문자열.",
+                            },
+                            "source_text": {
+                                "type": "string",
+                                "description": "상품 카드에서 이름·가격·수량을 뒷받침하는 짧은 원문 줄.",
+                            },
+                            "confidence": {
+                                "type": "string",
+                                "description": "상품명, 가격, 수량이 같은 상품 카드로 연결됐다고 판단하는 신뢰도: high 또는 low.",
+                            },
+                        },
+                        "required": [
+                            "description",
+                            "option",
+                            "package_size",
+                            "order_quantity",
+                            "unit_price",
+                            "item_amount",
+                            "source_text",
+                            "confidence",
+                        ],
+                    },
+                },
+                "products_subtotal": {
+                    "type": "string",
+                    "description": "화면에 명시된 상품 금액 합계. 없으면 빈 문자열. 개별 상품 금액으로 추정하지 않는다.",
+                },
+                "shipping": {
+                    "type": "string",
+                    "description": "화면에 명시된 배송비. 없거나 불명확하면 빈 문자열.",
+                },
+                "discount": {
+                    "type": "string",
+                    "description": "화면에 명시된 할인 합계. 없거나 불명확하면 빈 문자열.",
+                },
+                "discount_present": {
+                    "type": "boolean",
+                    "description": "완전한 주문 요약을 읽었고 할인 항목이 명시적으로 없을 때만 true.",
+                },
+                "payable": {
+                    "type": "string",
+                    "description": "화면에 명시된 결제 예정/주문 금액. 없으면 빈 문자열. 품목 합계로 만들지 않는다.",
+                },
+            },
+            "required": [
+                "items",
+                "products_subtotal",
+                "shipping",
+                "discount",
+                "discount_present",
+                "payable",
+            ],
+        }
+        mime = (
+            content_type
+            if content_type.startswith("image/")
+            else "application/octet-stream"
+        )
+        image_data = base64.b64encode(file_bytes).decode("ascii")
+        request_body = {
+            "model": "information-extract",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "장바구니/구매 전 주문 화면을 시각적 문맥으로 읽으세요. "
+                        "상품 카드마다 상품명, 옵션, 포장 규격, 실제 주문 수량, 단가, 해당 행 전체 금액을 연결하세요. "
+                        "주문 수량은 '18개', 포장 규격은 '20개입'처럼 의미가 다릅니다. "
+                        "행 굵은 금액은 단가가 아니라 해당 품목 전액일 수 있으니 단가와 행 금액을 구별하세요. "
+                        "상품 요약, 배송비, 할인, 결제 예정액은 상품 행과 별도로 읽으세요. "
+                        "버튼, 메뉴, 안내문을 상품으로 만들지 마세요. 안 보이거나 모호한 값은 빈 문자열로 두고 추정하지 마세요. "
+                        "결제 완료/카드 승인 여부는 판단하지 마세요."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"파일명: {filename}. 이 장바구니 이미지에서 상품 행과 주문 요약을 각각 추출하세요.",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{image_data}"},
+                        },
+                    ],
+                },
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "shopping_cart", "schema": schema},
+            },
+        }
+        try:
+            response = httpx.post(
+                "https://api.upstage.ai/v1/information-extraction/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=request_body,
+                timeout=90,
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            if isinstance(content, str):
+                result = json.loads(content)
+            elif isinstance(content, dict):
+                result = content
+            else:
+                raise ValueError("Unexpected information extraction response")
+            return _normalize_cart_extraction(result)
+        except Exception:
+            pass
+
+    ocr_result = parse_receipt(file_bytes, filename, content_type)
+    result = extract_cart_fields(ocr_result["raw_text"])
+    result["extraction_method"] = "ocr_fallback"
+    return result
+
+
+def _parse_optional_amount(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    numbers = _amounts(cleaned)
+    return numbers[-1] if numbers else None
+
+
+def _parse_optional_quantity(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    match = re.search(r"\d+", str(value).replace(",", ""))
+    return int(match.group(0)) if match else None
+
+
+def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
+    items = []
+    for item in result.get("items", []):
+        description = re.sub(r"\s+", " ", str(item.get("description") or "")).strip()
+        if not description or CART_UI_NOISE_RE.search(description):
+            continue
+        order_quantity = _parse_optional_quantity(item.get("order_quantity"))
+        unit_price = _parse_optional_amount(item.get("unit_price"))
+        item_amount = _parse_optional_amount(item.get("item_amount"))
+        needs_review = (
+            order_quantity is None
+            or item_amount is None
+            or str(item.get("confidence", "")).lower() == "low"
+        )
+        if not needs_review and unit_price is not None:
+            if unit_price * order_quantity != item_amount:
+                needs_review = True
+        if not needs_review and unit_price is None:
+            unit_price = item_amount / order_quantity
+        items.append(
+            {
+                "description": description,
+                "option": re.sub(r"\s+", " ", str(item.get("option") or "")).strip(),
+                "package_size": re.sub(
+                    r"\s+", " ", str(item.get("package_size") or "")
+                ).strip(),
+                "order_quantity": order_quantity or 1,
+                "quantity": 1,
+                "unit_price": unit_price,
+                "item_amount": item_amount,
+                "amount": item_amount,
+                "price_candidates": [item_amount] if item_amount is not None else [],
+                "needs_review": needs_review,
+                "source_text": str(item.get("source_text") or ""),
+            }
+        )
+
+    products_subtotal = _parse_optional_amount(result.get("products_subtotal"))
+    shipping = _parse_optional_amount(result.get("shipping"))
+    discount = _parse_optional_amount(result.get("discount"))
+    payable = _parse_optional_amount(result.get("payable"))
+    discount_seen = bool(result.get("discount_present")) or discount is not None
+    if discount_seen and discount is None:
+        discount = 0
+
+    known_amounts = [
+        item["item_amount"] for item in items if item["item_amount"] is not None
+    ]
+    calculated_items_subtotal = (
+        sum(known_amounts) if items and len(known_amounts) == len(items) else None
     )
+    products_status = (
+        "unavailable"
+        if products_subtotal is None
+        else "review_required"
+        if calculated_items_subtotal is None
+        or any(item["needs_review"] for item in items)
+        else "matched"
+        if calculated_items_subtotal == products_subtotal
+        else "mismatch"
+    )
+    calculated_payable = None
+    if products_subtotal is not None and shipping is not None and discount_seen:
+        calculated_payable = products_subtotal + shipping - (discount or 0)
+    payable_status = (
+        "unavailable"
+        if payable is None
+        else "review_required"
+        if calculated_payable is None
+        else "matched"
+        if calculated_payable == payable
+        else "mismatch"
+    )
+    return {
+        "items": items,
+        "products_subtotal": products_subtotal,
+        "calculated_items_subtotal": calculated_items_subtotal,
+        "shipping": shipping,
+        "discount": discount,
+        "discount_seen": discount_seen,
+        "discount_inferred_zero": False,
+        "payable": payable,
+        "calculated_payable": calculated_payable,
+        "products_status": products_status,
+        "payable_status": payable_status,
+        "summary_seen": any(
+            value is not None for value in (products_subtotal, shipping, payable)
+        ),
+        "raw_text": "",
+        "extraction_method": "visual_information_extraction",
+    }

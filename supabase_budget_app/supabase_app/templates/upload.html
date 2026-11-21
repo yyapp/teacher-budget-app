@@ -58,7 +58,7 @@
         </div>
         <div style="display:flex;gap:10px;margin-top:16px;">
             <button type="submit" name="action" value="save" class="btn btn-primary" {% if not review["items"] %}disabled{% endif %}>품목 목록으로 등록</button>
-            <button type="submit" name="action" value="cancel" class="btn btn-secondary" formnovalidate onclick="return confirm('현재 파싱 결과와 임시 첨부 파일을 버리고 업로드 화면을 초기화할까요?');">파싱 결과 버리기 · 초기화</button>
+            <button type="submit" name="action" value="cancel" class="btn btn-secondary" formnovalidate onclick="return confirm('현재 검토 내용을 지우고 영수증 첨부 화면으로 돌아갈까요?');">초기화</button>
         </div>
     </form>
     {% if review["items"] %}

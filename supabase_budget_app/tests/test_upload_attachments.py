@@ -36,13 +36,14 @@ class UploadAttachmentTests(unittest.TestCase):
                 }
 
             review_page = client.get("/upload")
-            self.assertIn("파싱 결과 버리기 · 초기화".encode(), review_page.data)
+            self.assertIn(">초기화</button>".encode(), review_page.data)
             response = client.post("/upload", data={"action": "cancel"})
 
             with client.session_transaction() as state:
                 self.assertNotIn("pending_receipt", state)
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/upload")
         self.assertEqual(
             {call.args[0] for call in delete.call_args_list},
             {"raw/temp/receipt.jpg", "raw/temp/statement.pdf"},
@@ -78,7 +79,7 @@ class UploadAttachmentTests(unittest.TestCase):
                 state["unrelated"] = "keep"
 
             review_page = client.get("/cart-review")
-            self.assertIn("파싱 결과 버리기 · 초기화".encode(), review_page.data)
+            self.assertIn(">초기화</button>".encode(), review_page.data)
             response = client.post("/cart-review", data={"action": "cancel"})
 
             with client.session_transaction() as state:
@@ -86,6 +87,7 @@ class UploadAttachmentTests(unittest.TestCase):
                 self.assertEqual(state["unrelated"], "keep")
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/cart-review")
 
     def test_transaction_items_and_extra_evidence_use_existing_notes_column(self):
         class InsertQuery:
@@ -352,6 +354,7 @@ class UploadAttachmentTests(unittest.TestCase):
                     "item_option": [""],
                     "item_package_size": [""],
                     "item_source_text": ["교재 2개 5,000원 10,000원"],
+                    "item_reviewed": ["1"],
                     "item_order_quantity": ["2"],
                     "item_amount": ["10000"],
                     "cart_total": "10000",
@@ -432,6 +435,7 @@ class UploadAttachmentTests(unittest.TestCase):
                     "item_source_text": [
                         item["source_text"] for item in review["items"]
                     ],
+                    "item_reviewed": ["1", "1"],
                     "item_order_quantity": ["18", "18"],
                     "item_amount": ["28800", "21600"],
                     "cart_total": "53400",
@@ -492,6 +496,7 @@ class UploadAttachmentTests(unittest.TestCase):
                     "item_option": [""],
                     "item_package_size": [""],
                     "item_source_text": ["교재"],
+                    "item_reviewed": ["1"],
                     "item_order_quantity": ["1"],
                     "item_amount": ["5000"],
                     "cart_total": "6000",
@@ -547,6 +552,7 @@ class UploadAttachmentTests(unittest.TestCase):
                     "item_option": [""],
                     "item_package_size": [""],
                     "item_source_text": ["교재"],
+                    "item_reviewed": ["1"],
                     "item_order_quantity": ["1"],
                     "item_amount": ["5000"],
                     "cart_total": "5000",
@@ -563,6 +569,7 @@ class UploadAttachmentTests(unittest.TestCase):
                     "item_option": [""],
                     "item_package_size": [""],
                     "item_source_text": ["교재"],
+                    "item_reviewed": ["1"],
                     "item_order_quantity": ["1"],
                     "item_amount": ["5000"],
                     "cart_total": "5000",

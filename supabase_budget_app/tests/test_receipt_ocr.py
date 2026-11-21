@@ -1,17 +1,132 @@
 import os
+import json
 import unittest
 from unittest.mock import patch
 
+import httpx
 from supabase_app.receipt_ocr import (
     _ocr_text,
     cart_items_from_ocr,
     extract_cart_fields,
     extract_receipt_fields,
+    parse_cart_image,
     parse_receipt,
 )
 
 
 class ReceiptOcrParsingTests(unittest.TestCase):
+    @patch("supabase_app.receipt_ocr.httpx.post")
+    def test_cart_image_primary_path_uses_visual_context_and_schema(self, post):
+        post.return_value.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "items": [
+                                    {
+                                        "description": "곰돌이푸 짝꿍 미니 수첩",
+                                        "option": "",
+                                        "package_size": "",
+                                        "order_quantity": "18",
+                                        "unit_price": "1600",
+                                        "item_amount": "28800",
+                                        "source_text": "1,600원 18개 28,800원",
+                                        "confidence": "high",
+                                    },
+                                    {
+                                        "description": "크리스마스 산타모자 산타분장",
+                                        "option": "",
+                                        "package_size": "",
+                                        "order_quantity": "18",
+                                        "unit_price": "1200",
+                                        "item_amount": "21600",
+                                        "source_text": "1,200원 18개 21,600원",
+                                        "confidence": "high",
+                                    },
+                                ],
+                                "products_subtotal": "50400",
+                                "shipping": "3000",
+                                "discount": "0",
+                                "discount_present": True,
+                                "payable": "53400",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+        with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
+            result = parse_cart_image(b"cart image", "cart.png", "image/png")
+
+        request = post.call_args.kwargs["json"]
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://api.upstage.ai/v1/information-extraction/chat/completions",
+        )
+        self.assertEqual(result["extraction_method"], "visual_information_extraction")
+        self.assertEqual(
+            [item["item_amount"] for item in result["items"]], [28800, 21600]
+        )
+        self.assertEqual(result["calculated_items_subtotal"], 50400)
+        self.assertEqual(result["calculated_payable"], 53400)
+        self.assertIn("상품 카드", request["messages"][0]["content"])
+
+    @patch("supabase_app.receipt_ocr.httpx.post")
+    def test_visual_low_confidence_keeps_item_unverified(self, post):
+        post.return_value.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "items": [
+                                    {
+                                        "description": "과자",
+                                        "option": "",
+                                        "package_size": "",
+                                        "order_quantity": "18",
+                                        "unit_price": "1600",
+                                        "item_amount": "28800",
+                                        "source_text": "가격 영역",
+                                        "confidence": "low",
+                                    }
+                                ],
+                                "products_subtotal": "28800",
+                                "shipping": "0",
+                                "discount": "0",
+                                "discount_present": True,
+                                "payable": "28800",
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
+            result = parse_cart_image(b"cart image", "cart.png", "image/png")
+
+        self.assertTrue(result["items"][0]["needs_review"])
+        self.assertEqual(result["products_status"], "review_required")
+
+    @patch("supabase_app.receipt_ocr.parse_receipt")
+    @patch(
+        "supabase_app.receipt_ocr.httpx.post",
+        side_effect=httpx.ConnectError("service unavailable"),
+    )
+    def test_cart_context_service_failure_uses_ocr_fallback(
+        self, _post, parse_receipt_mock
+    ):
+        parse_receipt_mock.return_value = extract_cart_fields(
+            "수첩\n1,600원 18개 28,800원\n상품 합계 28,800원\n배송비 0원\n주문 금액 28,800원"
+        )
+        with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
+            result = parse_cart_image(b"cart image", "cart.png", "image/png")
+
+        self.assertEqual(result["extraction_method"], "ocr_fallback")
+        self.assertEqual(result["items"][0]["item_amount"], 28800)
+
     def test_rebuilds_visual_rows_from_ocr_word_positions(self):
         text = _ocr_text(
             {
@@ -142,6 +257,58 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         self.assertEqual(fields["items"][0]["package_size"], "20개입")
         self.assertEqual(fields["items"][0]["order_quantity"], 18)
         self.assertEqual(fields["items"][0]["item_amount"], 48960)
+
+    @patch("supabase_app.receipt_ocr.httpx.post")
+    def test_cart_image_uses_visual_information_extraction_schema(self, post):
+        post.return_value.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"items":['
+                            '{"description":"곰돌이푸 짝꿍 미니 수첩","option":"","package_size":"","order_quantity":"18","unit_price":"1600","item_amount":"28800","source_text":"1,600원 18개 28,800원","confidence":"high"},'
+                            '{"description":"크리스마스 산타모자 산타분장","option":"","package_size":"","order_quantity":"18","unit_price":"1200","item_amount":"21600","source_text":"1,200원 18개 21,600원","confidence":"high"}'
+                            '],"products_subtotal":"50400","shipping":"3000","discount":"0","discount_present":true,"payable":"53400"}'
+                        )
+                    }
+                }
+            ]
+        }
+        with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
+            result = parse_cart_image(b"image-bytes", "cart.png", "image/png")
+
+        self.assertEqual(result["extraction_method"], "visual_information_extraction")
+        self.assertEqual(
+            [item["description"] for item in result["items"]],
+            ["곰돌이푸 짝꿍 미니 수첩", "크리스마스 산타모자 산타분장"],
+        )
+        self.assertEqual([item["order_quantity"] for item in result["items"]], [18, 18])
+        self.assertEqual(
+            [item["item_amount"] for item in result["items"]], [28800, 21600]
+        )
+        self.assertEqual(result["products_status"], "matched")
+        self.assertEqual(result["payable_status"], "matched")
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://api.upstage.ai/v1/information-extraction/chat/completions",
+        )
+
+    @patch("supabase_app.receipt_ocr.parse_receipt")
+    @patch(
+        "supabase_app.receipt_ocr.httpx.post",
+        side_effect=RuntimeError("model unavailable"),
+    )
+    def test_cart_image_falls_back_to_ocr_when_context_model_unavailable(
+        self, _post, parse_receipt_mock
+    ):
+        parse_receipt_mock.return_value = extract_cart_fields(
+            "수첩\n1,600원 18개 28,800원\n상품 합계 28,800원\n배송비 0원\n주문 금액 28,800원"
+        )
+        with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
+            result = parse_cart_image(b"image-bytes", "cart.png", "image/png")
+
+        self.assertEqual(result["extraction_method"], "ocr_fallback")
+        self.assertEqual(result["items"][0]["item_amount"], 28800)
 
     def test_cart_missing_original_summaries_are_not_reported_as_verified(self):
         fields = extract_cart_fields(

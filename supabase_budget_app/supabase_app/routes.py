@@ -694,6 +694,7 @@ def cart_review() -> Any:
                     "discount_seen",
                     "discount_inferred_zero",
                     "summary_seen",
+                    "extraction_method",
                 )
             }
             payable = fields.get("payable")
@@ -724,6 +725,7 @@ def cart_review() -> Any:
                 "cart_summary": summary,
                 "notes": non_empty_str(request.form.get("notes")),
                 "parser_version": 4,
+                "extraction_method": fields.get("extraction_method", "ocr_fallback"),
             }
             session["cart_image_review"] = review
             return render_template("cart_review.html", budgets=budgets, review=review)
@@ -736,6 +738,7 @@ def cart_review() -> Any:
         options = request.form.getlist("item_option")
         package_sizes = request.form.getlist("item_package_size")
         source_texts = request.form.getlist("item_source_text")
+        item_reviewed = request.form.getlist("item_reviewed")
         order_quantities = request.form.getlist("item_order_quantity")
         item_amounts = request.form.getlist("item_amount")
         line_items = []
@@ -744,6 +747,7 @@ def cart_review() -> Any:
             option,
             package_size,
             source_text,
+            reviewed,
             order_quantity,
             amount,
         ) in enumerate(
@@ -752,6 +756,7 @@ def cart_review() -> Any:
                 options,
                 package_sizes,
                 source_texts,
+                item_reviewed,
                 order_quantities,
                 item_amounts,
             )
@@ -770,6 +775,7 @@ def cart_review() -> Any:
                         "unit_price": amount_value / order_quantity_value,
                         "amount": amount_value,
                         "source_text": source_text,
+                        "needs_review": reviewed != "1",
                     }
                 )
         if (
@@ -778,6 +784,8 @@ def cart_review() -> Any:
             or len(descriptions) != len(options)
             or len(options) != len(package_sizes)
             or len(package_sizes) != len(source_texts)
+            or len(source_texts) != len(item_reviewed)
+            or any(reviewed != "1" for reviewed in item_reviewed)
             or len(source_texts) != len(order_quantities)
             or len(descriptions) != len(order_quantities)
             or len(order_quantities) != len(item_amounts)

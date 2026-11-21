@@ -27,7 +27,7 @@
                 <button type="button" class="clear-file" aria-label="장바구니 이미지 선택 취소" title="선택 취소" hidden>×</button>
             </div>
             <p id="cart_image_name" class="selected-file" aria-live="polite"></p>
-            <p class="text-muted">PNG, JPG, PDF 지원 (최대 10MB). 이미지는 품목을 읽는 데만 사용됩니다.</p>
+            <p class="text-muted">PNG, JPG, PDF 지원 (최대 10MB). 상품 카드의 문맥을 함께 읽기 위해 이미지가 Upstage로 전송됩니다. 자동 판독 추가 사용량이 발생할 수 있습니다.</p>
         </div>
         <div class="form-group">
             <label for="notes">메모 (선택)</label>
@@ -96,8 +96,12 @@
                 <thead><tr><th>상품</th><th>옵션 / 규격</th><th>주문 수량</th><th>단가</th><th>품목 금액</th><th>장부 수량</th><th></th></tr></thead>
                 <tbody id="cart-items">
                 {% for item in review["items"] %}
-                    <tr>
-                        <td><input name="item_description" aria-label="{{ loop.index }}번 품목" value="{{ item.description }}" required style="min-width:180px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
+                    <tr data-needs-review="{{ 'true' if item.needs_review else 'false' }}">
+                        <td>
+                            <input name="item_description" aria-label="{{ loop.index }}번 품목" value="{{ item.description }}" required style="min-width:180px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;">
+                            <input type="hidden" name="item_reviewed" value="{{ '0' if item.needs_review else '1' }}">
+                            {% if item.needs_review %}<small style="display:block;color:#a15c00;">문맥 연결이 불확실합니다. 원문 근거를 확인한 뒤 이 행을 수정해 주세요.</small>{% endif %}
+                        </td>
                         <td>
                             <input name="item_option" aria-label="{{ loop.index }}번 옵션" value="{{ item.option }}" style="min-width:100px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;">
                             <input type="hidden" name="item_package_size" value="{{ item.package_size }}">
@@ -127,6 +131,7 @@
             data-payable-source="{{ review.total_source }}"
             style="padding:14px;border:1px solid #e4e7ec;border-radius:8px;margin:12px 0 18px;">
             <h3 style="font-size:1rem;margin-bottom:8px;">주문 요약 (원문 항목 별도 대조)</h3>
+            {% if review.extraction_method == 'ocr_fallback' %}<p class="text-muted">문맥 기반 이미지 분석을 사용할 수 없어 OCR 읽기 순서로 분석했습니다. 상품 연결을 특히 확인해 주세요.</p>{% else %}<p class="text-muted">이미지에서 상품 카드 구조와 주문 요약을 문맥 기반으로 읽었습니다. 원문 검증 상태도 함께 확인해 주세요.</p>{% endif %}
             <div class="row">
                 <p>원문 상품 합계: <strong>{% if products_subtotal is not none %}{{ "{:,.0f}".format(products_subtotal) }}원{% else %}읽지 못함{% endif %}</strong></p>
                 <p>품목 행 합계: <strong id="cart-items-total">{{ "{:,.0f}".format(review.items_total) }}원</strong></p>
@@ -163,7 +168,7 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
             <button type="submit" name="action" value="requisition" class="btn btn-primary">품의 완료</button>
             <button type="submit" name="action" value="purchase" class="btn btn-success">구매 완료</button>
-            <button type="submit" name="action" value="cancel" formnovalidate class="btn btn-secondary" onclick="return confirm('현재 장바구니 파싱 결과를 버리고 처음 화면으로 돌아갈까요?');">파싱 결과 버리기 · 초기화</button>
+            <button type="submit" name="action" value="cancel" formnovalidate class="btn btn-secondary" onclick="return confirm('현재 검토 내용을 지우고 장바구니 이미지 첨부 화면으로 돌아갈까요?');">초기화</button>
         </div>
     </form>
     <script>
@@ -181,7 +186,7 @@
         const discountSeen = summaryBox.dataset.discountSeen === 'true';
         function verifyCart() {
             const rows = [...document.querySelectorAll('#cart-items tr')];
-            let unresolved = false;
+            let unresolved = rows.some(row => row.dataset.needsReview === 'true' || row.querySelector('[name="item_reviewed"]').value !== '1');
             let sum = 0;
             for (const row of rows) {
                 const amountInput = row.querySelector('[name="item_amount"]');
@@ -236,9 +241,16 @@
             const payableMismatch = sourcePayable !== null && formulaPayable !== null && sourcePayable !== formulaPayable;
             buttons.forEach(button => button.disabled = unresolved || !rows.length || sourceMismatch || payableMismatch || !(ledgerAmount > 0));
         }
-        reviewForm.addEventListener('input', verifyCart);
-        reviewForm.addEventListener('change', verifyCart);
-        document.querySelectorAll('[name="item_order_quantity"], [name="item_amount"]').forEach(input => input.addEventListener('input', verifyCart));
+        function markEditedRow(event) {
+            const row = event.target.closest('#cart-items tr');
+            if (row) {
+                row.dataset.needsReview = 'false';
+                row.querySelector('[name="item_reviewed"]').value = '1';
+            }
+            verifyCart();
+        }
+        reviewForm.addEventListener('input', markEditedRow);
+        reviewForm.addEventListener('change', markEditedRow);
         document.querySelectorAll('.remove-cart-item').forEach(button => button.addEventListener('click', () => {
             button.closest('tr').remove();
             verifyCart();
