@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import httpx
 from supabase_app.receipt_ocr import (
+    ReceiptOcrError,
     _ocr_text,
     cart_items_from_ocr,
     extract_cart_fields,
@@ -130,6 +131,23 @@ class ReceiptOcrParsingTests(unittest.TestCase):
 
         self.assertEqual(result["extraction_method"], "ocr_fallback")
         self.assertEqual(result["items"][0]["item_amount"], 28800)
+
+    @patch(
+        "supabase_app.receipt_ocr.parse_receipt",
+        side_effect=ReceiptOcrError("ocr unavailable"),
+    )
+    @patch(
+        "supabase_app.receipt_ocr.httpx.post",
+        side_effect=RuntimeError("visual unavailable"),
+    )
+    def test_both_cart_readers_failed_reports_service_failure_not_blurry_image(
+        self, _post, _ocr
+    ):
+        with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
+            with self.assertRaisesRegex(
+                ReceiptOcrError, "문맥 분석과 OCR 읽기가 모두 실패"
+            ):
+                parse_cart_image(b"cart image", "cart.png", "image/png")
 
     def test_rebuilds_visual_rows_from_ocr_word_positions(self):
         text = _ocr_text(

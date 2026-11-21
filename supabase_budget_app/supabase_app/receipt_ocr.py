@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 import os
 import re
 from datetime import date
@@ -12,6 +13,9 @@ import httpx
 
 class ReceiptOcrError(RuntimeError):
     """Raised when OCR cannot read a receipt."""
+
+
+logger = logging.getLogger(__name__)
 
 
 AMOUNT_RE = re.compile(r"(?<!\d)(\d[\d,]*)(?:\s*원)?")
@@ -727,10 +731,20 @@ def parse_cart_image(
             else:
                 raise ValueError("Unexpected information extraction response")
             return _normalize_cart_extraction(result)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Cart visual extraction failed (%s); trying OCR fallback",
+                type(exc).__name__,
+            )
 
-    ocr_result = parse_receipt(file_bytes, filename, content_type)
+    try:
+        ocr_result = parse_receipt(file_bytes, filename, content_type)
+    except ReceiptOcrError as exc:
+        if api_key:
+            raise ReceiptOcrError(
+                "장바구니 문맥 분석과 OCR 읽기가 모두 실패했습니다. 잠시 후 다시 시도해 주세요."
+            ) from exc
+        raise
     result = extract_cart_fields(ocr_result["raw_text"])
     result["extraction_method"] = "ocr_fallback"
     return result
