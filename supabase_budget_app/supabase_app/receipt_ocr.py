@@ -44,8 +44,9 @@ CART_UI_NOISE_RE = re.compile(
 CART_PRODUCT_TOTAL_RE = re.compile(r"상품\s*(?:합계|금액)|총\s*상품\s*금액|상품금액")
 CART_SHIPPING_RE = re.compile(r"배송비|배송료|택배비")
 CART_DISCOUNT_RE = re.compile(r"할인|쿠폰|차감|사용\s*포인트")
+CART_ORDER_AMOUNT_RE = re.compile(r"선택\s*상품\s*금액|주문\s*금액(?!\s*상세)")
 CART_PAYABLE_RE = re.compile(
-    r"결제\s*예정\s*금액|최종\s*결제\s*금액|주문\s*금액|결제\s*예정|결제금액"
+    r"결제\s*예정\s*금액|최종\s*결제\s*금액|실\s*결제\s*금액|결제\s*예정|결제금액"
 )
 
 
@@ -345,6 +346,7 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
         "products_subtotal": None,
         "shipping": None,
         "discount": None,
+        "order_amount": None,
         "payable": None,
     }
     items: list[dict[str, Any]] = []
@@ -360,6 +362,7 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
             CART_PRODUCT_TOTAL_RE.search(line)
             or CART_SHIPPING_RE.search(line)
             or CART_DISCOUNT_RE.search(line)
+            or CART_ORDER_AMOUNT_RE.search(line)
             or CART_PAYABLE_RE.search(line)
         )
         if is_summary:
@@ -385,6 +388,8 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
                 elif CART_DISCOUNT_RE.search(line):
                     discount_seen = True
                     summary["discount"] = (summary["discount"] or 0) + amount
+                elif CART_ORDER_AMOUNT_RE.search(line):
+                    summary["order_amount"] = amount
                 elif CART_PAYABLE_RE.search(line):
                     summary["payable"] = amount
             pending_name = ""
@@ -458,8 +463,9 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
         and not discount_seen
         and summary["products_subtotal"] is not None
         and summary["shipping"] is not None
-        and summary["payable"] is not None
-        and summary["products_subtotal"] + summary["shipping"] == summary["payable"]
+        and (summary["order_amount"] is not None or summary["payable"] is not None)
+        and summary["products_subtotal"] + summary["shipping"]
+        == (summary["order_amount"] or summary["payable"])
     ):
         # This order summary exposes all payable components but has no discount row.
         summary["discount"] = 0
@@ -484,6 +490,20 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
         else "mismatch"
         if calculated_items_subtotal is not None
         else "review_required"
+    )
+    calculated_order_amount = None
+    if summary["products_subtotal"] is not None and summary["shipping"] is not None:
+        calculated_order_amount = int(summary["products_subtotal"]) + int(
+            summary["shipping"]
+        )
+    order_amount_status = (
+        "unavailable"
+        if summary["order_amount"] is None
+        else "review_required"
+        if calculated_order_amount is None
+        else "matched"
+        if calculated_order_amount == summary["order_amount"]
+        else "mismatch"
     )
     payable_components = (
         summary["products_subtotal"],
@@ -511,6 +531,9 @@ def extract_cart_fields(text: str) -> dict[str, Any]:
         "calculated_items_subtotal": calculated_items_subtotal,
         "shipping": summary["shipping"],
         "discount": summary["discount"],
+        "order_amount": summary["order_amount"],
+        "calculated_order_amount": calculated_order_amount,
+        "order_amount_status": order_amount_status,
         "discount_seen": discount_seen,
         "discount_inferred_zero": discount_inferred_zero,
         "payable": summary["payable"],
@@ -630,6 +653,10 @@ def parse_cart_image(
                     "type": "string",
                     "description": "화면에 명시된 할인 합계. 없거나 불명확하면 빈 문자열.",
                 },
+                "order_amount": {
+                    "type": "string",
+                    "description": "상품 금액과 배송비를 더한 할인 전 주문 금액. 결제 예정 최종 금액과 다른 값이며 원문에 없으면 빈 문자열.",
+                },
                 "discount_present": {
                     "type": "boolean",
                     "description": "완전한 주문 요약을 읽었고 할인 항목이 명시적으로 없을 때만 true.",
@@ -644,15 +671,11 @@ def parse_cart_image(
                 "products_subtotal",
                 "shipping",
                 "discount",
+                "order_amount",
                 "discount_present",
                 "payable",
             ],
         }
-        mime = (
-            content_type
-            if content_type.startswith("image/")
-            else "application/octet-stream"
-        )
         image_data = base64.b64encode(file_bytes).decode("ascii")
         request_body = {
             "model": "information-extract",
@@ -664,21 +687,21 @@ def parse_cart_image(
                         "상품 카드마다 상품명, 옵션, 포장 규격, 실제 주문 수량, 단가, 해당 행 전체 금액을 연결하세요. "
                         "주문 수량은 '18개', 포장 규격은 '20개입'처럼 의미가 다릅니다. "
                         "행 굵은 금액은 단가가 아니라 해당 품목 전액일 수 있으니 단가와 행 금액을 구별하세요. "
-                        "상품 요약, 배송비, 할인, 결제 예정액은 상품 행과 별도로 읽으세요. "
+                        "상품 합계, 배송비, 할인, 할인 전 주문 금액, 할인 후 결제 예정액은 각각 별도 값입니다. "
+                        "할인 전 주문 금액을 결제 예정액으로 혼동하지 마세요. "
                         "버튼, 메뉴, 안내문을 상품으로 만들지 마세요. 안 보이거나 모호한 값은 빈 문자열로 두고 추정하지 마세요. "
-                        "결제 완료/카드 승인 여부는 판단하지 마세요."
+                        "결제 완료/카드 승인 여부는 판단하지 마세요. "
+                        f"첨부 파일명은 {filename}입니다."
                     ),
                 },
                 {
                     "role": "user",
                     "content": [
                         {
-                            "type": "text",
-                            "text": f"파일명: {filename}. 이 장바구니 이미지에서 상품 행과 주문 요약을 각각 추출하세요.",
-                        },
-                        {
                             "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{image_data}"},
+                            "image_url": {
+                                "url": f"data:application/octet-stream;base64,{image_data}"
+                            },
                         },
                     ],
                 },
@@ -772,6 +795,7 @@ def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
     products_subtotal = _parse_optional_amount(result.get("products_subtotal"))
     shipping = _parse_optional_amount(result.get("shipping"))
     discount = _parse_optional_amount(result.get("discount"))
+    order_amount = _parse_optional_amount(result.get("order_amount"))
     payable = _parse_optional_amount(result.get("payable"))
     discount_seen = bool(result.get("discount_present")) or discount is not None
     if discount_seen and discount is None:
@@ -796,6 +820,18 @@ def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
     calculated_payable = None
     if products_subtotal is not None and shipping is not None and discount_seen:
         calculated_payable = products_subtotal + shipping - (discount or 0)
+    calculated_order_amount = None
+    if products_subtotal is not None and shipping is not None:
+        calculated_order_amount = products_subtotal + shipping
+    order_amount_status = (
+        "unavailable"
+        if order_amount is None
+        else "review_required"
+        if calculated_order_amount is None
+        else "matched"
+        if calculated_order_amount == order_amount
+        else "mismatch"
+    )
     payable_status = (
         "unavailable"
         if payable is None
@@ -811,6 +847,9 @@ def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
         "calculated_items_subtotal": calculated_items_subtotal,
         "shipping": shipping,
         "discount": discount,
+        "order_amount": order_amount,
+        "calculated_order_amount": calculated_order_amount,
+        "order_amount_status": order_amount_status,
         "discount_seen": discount_seen,
         "discount_inferred_zero": False,
         "payable": payable,

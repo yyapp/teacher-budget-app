@@ -686,6 +686,9 @@ def cart_review() -> Any:
                     "products_subtotal",
                     "shipping",
                     "discount",
+                    "order_amount",
+                    "calculated_order_amount",
+                    "order_amount_status",
                     "payable",
                     "calculated_items_subtotal",
                     "calculated_payable",
@@ -704,6 +707,9 @@ def cart_review() -> Any:
             elif fields.get("calculated_payable") is not None:
                 suggested_total = fields["calculated_payable"]
                 total_source = "calculated"
+            elif fields.get("order_amount") is not None:
+                suggested_total = fields["order_amount"]
+                total_source = "order_amount_image"
             elif fields.get("products_subtotal") is not None:
                 suggested_total = fields["products_subtotal"]
                 total_source = "products_subtotal_only"
@@ -820,6 +826,18 @@ def cart_review() -> Any:
             return render_template("cart_review.html", budgets=budgets, review=review)
         source_payable = summary.get("payable")
         calculated_payable = summary.get("calculated_payable")
+        source_order_amount = summary.get("order_amount")
+        calculated_order_amount = summary.get("calculated_order_amount")
+        if (
+            source_order_amount is not None
+            and calculated_order_amount is not None
+            and source_order_amount != calculated_order_amount
+        ):
+            flash(
+                "원문 할인 전 주문 금액이 상품 합계와 배송비 계산에 맞지 않습니다. 주문 요약을 확인해 주세요.",
+                "error",
+            )
+            return render_template("cart_review.html", budgets=budgets, review=review)
         if (
             source_payable is not None
             and calculated_payable is not None

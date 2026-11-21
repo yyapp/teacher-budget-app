@@ -171,7 +171,7 @@ class UploadAttachmentTests(unittest.TestCase):
                     "products_subtotal": 10000,
                     "calculated_items_subtotal": 10000,
                     "shipping": 0,
-                    "discount": 0,
+                    "discount": 4510,
                     "payable": 10000,
                     "calculated_payable": 10000,
                     "products_status": "matched",
@@ -230,10 +230,13 @@ class UploadAttachmentTests(unittest.TestCase):
                     "products_subtotal": 50400,
                     "calculated_items_subtotal": 50400,
                     "shipping": 3000,
-                    "discount": 0,
+                    "discount": 4510,
                     "discount_seen": True,
-                    "payable": 53400,
-                    "calculated_payable": 53400,
+                    "order_amount": 53400,
+                    "calculated_order_amount": 53400,
+                    "order_amount_status": "matched",
+                    "payable": 48890,
+                    "calculated_payable": 48890,
                     "products_status": "matched",
                     "payable_status": "matched",
                 },
@@ -254,6 +257,9 @@ class UploadAttachmentTests(unittest.TestCase):
         self.assertIn("50,400원".encode(), response.data)
         self.assertIn("3,000원".encode(), response.data)
         self.assertIn("53,400원".encode(), response.data)
+        self.assertIn("4,510원".encode(), response.data)
+        self.assertIn("48,890원".encode(), response.data)
+        self.assertIn("할인 전 주문 금액".encode(), response.data)
         self.assertIn("원문 대조 일치".encode(), response.data)
         self.assertIn("상품 합계".encode(), response.data)
         self.assertNotIn("장바구니 목록".encode(), response.data)
@@ -1092,6 +1098,9 @@ class UploadAttachmentTests(unittest.TestCase):
                 "products_subtotal": 50400,
                 "shipping": 3000,
                 "discount": 0,
+                "order_amount": 53400,
+                "calculated_order_amount": 53400,
+                "order_amount_status": "matched",
                 "payable": 53400,
                 "calculated_payable": 53400,
                 "products_status": "matched",
@@ -1135,6 +1144,7 @@ class UploadAttachmentTests(unittest.TestCase):
         self.assertIn("50,400원".encode(), response.data)
         self.assertIn("3,000원".encode(), response.data)
         self.assertIn("53,400원".encode(), response.data)
+        self.assertIn("할인 전 주문 금액".encode(), response.data)
         self.assertIn("원문 추출 근거".encode(), response.data)
         self.assertIn("주문 수량".encode(), response.data)
 

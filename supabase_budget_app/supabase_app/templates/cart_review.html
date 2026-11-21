@@ -126,6 +126,7 @@
             data-source-products="{{ products_subtotal if products_subtotal is not none else '' }}"
             data-source-shipping="{{ shipping if shipping is not none else '' }}"
             data-source-discount="{{ discount if discount is not none else '' }}"
+            data-source-order-amount="{{ cart_summary.get('order_amount') if cart_summary.get('order_amount') is not none else '' }}"
             data-source-payable="{{ payable if payable is not none else '' }}"
             data-discount-seen="{{ 'true' if cart_summary.get('discount_seen') else 'false' }}"
             data-payable-source="{{ review.total_source }}"
@@ -137,11 +138,14 @@
                 <p>품목 행 합계: <strong id="cart-items-total">{{ "{:,.0f}".format(review.items_total) }}원</strong></p>
                 <p>배송비: <strong>{% if shipping is not none %}{{ "{:,.0f}".format(shipping) }}원{% else %}원문 항목 없음/미확인{% endif %}</strong></p>
                 <p>할인: <strong>{% if discount is not none %}-{{ "{:,.0f}".format(discount) }}원{% else %}원문 항목 없음/미확인{% endif %}</strong></p>
+                <p>원문 할인 전 주문 금액: <strong>{% if cart_summary.get('order_amount') is not none %}{{ "{:,.0f}".format(cart_summary.get('order_amount')) }}원{% else %}읽지 못함{% endif %}</strong></p>
                 <p>원문 결제 예정액: <strong>{% if payable is not none %}{{ "{:,.0f}".format(payable) }}원{% else %}읽지 못함{% endif %}</strong></p>
-                <p>품목+배송비-할인 계산: <strong>{% if calculated_payable is not none %}{{ "{:,.0f}".format(calculated_payable) }}원{% else %}비교 불가{% endif %}</strong></p>
+                <p>상품+배송비 계산: <strong>{% if cart_summary.get('calculated_order_amount') is not none %}{{ "{:,.0f}".format(cart_summary.get('calculated_order_amount')) }}원{% else %}비교 불가{% endif %}</strong></p>
+                <p>주문-할인 계산: <strong>{% if calculated_payable is not none %}{{ "{:,.0f}".format(calculated_payable) }}원{% else %}비교 불가{% endif %}</strong></p>
             </div>
             {% if cart_summary.get('discount_inferred_zero') %}<p class="text-muted">원문 요약에 할인 행이 없어 할인 0원으로 계산했습니다. 할인 행이 화면 밖에 있으면 주문 합계 검증에 반영되지 않을 수 있습니다.</p>{% endif %}
             <div id="product-check" role="status" class="alert {% if products_subtotal is not none and cart_summary.get('products_status') == 'matched' %}alert-success{% else %}alert-error{% endif %}" style="margin-top:10px;">{% if products_subtotal is none %}원문 상품 합계를 읽지 못해 원문 대조 불가입니다.{% elif cart_summary.get('products_status') == 'matched' %}원문 상품 합계와 품목 행 합계가 일치합니다.{% elif cart_summary.get('products_status') == 'mismatch' %}원문 상품 합계와 품목 행 합계가 다릅니다.{% else %}일부 품목 금액을 확인하지 못해 검토가 필요합니다.{% endif %}</div>
+            <div id="order-amount-check" role="status" class="alert {% if cart_summary.get('order_amount_status') == 'matched' %}alert-success{% else %}alert-error{% endif %}">{% if cart_summary.get('order_amount_status') == 'matched' %}할인 전 주문 금액이 상품 합계+배송비와 일치합니다.{% elif cart_summary.get('order_amount') is none %}할인 전 주문 금액은 원문에서 찾지 못해 대조 불가입니다.{% elif cart_summary.get('calculated_order_amount') is none %}상품 합계 또는 배송비가 없어 대조할 수 없습니다.{% else %}할인 전 주문 금액이 상품 합계+배송비와 다릅니다.{% endif %}</div>
             <div id="payable-check" role="status" class="alert {% if cart_summary.get('payable_status') == 'matched' %}alert-success{% else %}alert-error{% endif %}">{% if cart_summary.get('payable_status') == 'matched' %}상품·배송비·할인 계산과 원문 결제 예정액이 일치합니다.{% elif payable is none %}원문 결제 예정액을 읽지 못해 원문 대조 불가입니다.{% elif calculated_payable is none %}결제 예정액을 읽었지만 구성 금액이 부족해 대조할 수 없습니다.{% else %}상품·배송비·할인 계산과 원문 결제 예정액이 다릅니다.{% endif %}</div>
             <div class="form-group" style="max-width:360px;margin-bottom:0;">
                 <label for="cart_total">장부에 기록할 구매 예정 금액</label>
@@ -176,12 +180,14 @@
         const cartTotal = document.querySelector('#cart_total');
         const summaryBox = document.querySelector('#cart-summary');
         const productCheck = document.querySelector('#product-check');
+        const orderAmountCheck = document.querySelector('#order-amount-check');
         const payableCheck = document.querySelector('#payable-check');
         const buttons = [...reviewForm.querySelectorAll('button[name="action"]')];
         const formatMoney = amount => Math.round(amount).toLocaleString('ko-KR');
         const sourceProducts = summaryBox.dataset.sourceProducts === '' ? null : Number(summaryBox.dataset.sourceProducts);
         const sourceShipping = summaryBox.dataset.sourceShipping === '' ? null : Number(summaryBox.dataset.sourceShipping);
         const sourceDiscount = summaryBox.dataset.sourceDiscount === '' ? null : Number(summaryBox.dataset.sourceDiscount);
+        const sourceOrderAmount = summaryBox.dataset.sourceOrderAmount === '' ? null : Number(summaryBox.dataset.sourceOrderAmount);
         const sourcePayable = summaryBox.dataset.sourcePayable === '' ? null : Number(summaryBox.dataset.sourcePayable);
         const discountSeen = summaryBox.dataset.discountSeen === 'true';
         function verifyCart() {
@@ -199,6 +205,9 @@
             }
             const formulaPayable = sourceProducts !== null && sourceShipping !== null && discountSeen
                 ? sourceProducts + sourceShipping - (sourceDiscount || 0)
+                : null;
+            const calculatedOrderAmount = sourceProducts !== null && sourceShipping !== null
+                ? sourceProducts + sourceShipping
                 : null;
             const ledgerAmount = sourcePayable !== null
                 ? sourcePayable
@@ -237,9 +246,23 @@
                 payableCheck.className = 'alert alert-error';
                 payableCheck.textContent = `주문 요약 대조 불일치: 원문 결제 예정액 ${formatMoney(sourcePayable)}원 / 구성 계산 ${formatMoney(formulaPayable)}원 / 차액 ${formatMoney(Math.abs(sourcePayable - formulaPayable))}원`;
             }
+            if (sourceOrderAmount === null) {
+                orderAmountCheck.className = 'alert alert-error';
+                orderAmountCheck.textContent = '원문 할인 전 주문 금액을 읽지 못해 대조 불가입니다.';
+            } else if (calculatedOrderAmount === null) {
+                orderAmountCheck.className = 'alert alert-error';
+                orderAmountCheck.textContent = `원문 할인 전 주문 금액 ${formatMoney(sourceOrderAmount)}원은 읽었지만 상품 합계 또는 배송비가 없어 대조할 수 없습니다.`;
+            } else if (sourceOrderAmount === calculatedOrderAmount) {
+                orderAmountCheck.className = 'alert alert-success';
+                orderAmountCheck.textContent = `할인 전 주문 금액 대조 일치: ${formatMoney(sourceProducts)} + ${formatMoney(sourceShipping)} = ${formatMoney(sourceOrderAmount)}원`;
+            } else {
+                orderAmountCheck.className = 'alert alert-error';
+                orderAmountCheck.textContent = `할인 전 주문 금액 불일치: 원문 ${formatMoney(sourceOrderAmount)}원 / 상품+배송비 ${formatMoney(calculatedOrderAmount)}원`;
+            }
             const sourceMismatch = sourceProducts !== null && !unresolved && sum !== sourceProducts;
             const payableMismatch = sourcePayable !== null && formulaPayable !== null && sourcePayable !== formulaPayable;
-            buttons.forEach(button => button.disabled = unresolved || !rows.length || sourceMismatch || payableMismatch || !(ledgerAmount > 0));
+            const orderAmountMismatch = sourceOrderAmount !== null && calculatedOrderAmount !== null && sourceOrderAmount !== calculatedOrderAmount;
+            buttons.forEach(button => button.disabled = unresolved || !rows.length || sourceMismatch || payableMismatch || orderAmountMismatch || !(ledgerAmount > 0));
         }
         function markEditedRow(event) {
             const row = event.target.closest('#cart-items tr');

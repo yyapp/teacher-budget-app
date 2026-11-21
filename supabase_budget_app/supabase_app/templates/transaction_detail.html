@@ -44,6 +44,7 @@
             <p>배송비: {% if transaction.cart_check.shipping is not none %}{{ "{:,.0f}".format(transaction.cart_check.shipping) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
             <p>할인: {% if transaction.cart_check.discount is not none %}{{ "{:,.0f}".format(transaction.cart_check.discount) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
             {% if transaction.cart_check.discount_inferred_zero %}<p class="text-muted">원문 요약에 할인 행이 없어 0원으로 가정해 비교했습니다.</p>{% endif %}
+            <p>할인 전 주문 금액: {% if transaction.cart_check.order_amount is not none %}{{ "{:,.0f}".format(transaction.cart_check.order_amount) }}원{% else %}원문에서 읽지 못함{% endif %} ({% if transaction.cart_check.order_amount_status == 'matched' %}상품+배송비와 일치{% elif transaction.cart_check.order_amount_status == 'mismatch' %}상품+배송비와 불일치{% else %}대조 불가{% endif %})</p>
             <p>결제 예정액: {% if transaction.cart_check.payable is not none %}{{ "{:,.0f}".format(transaction.cart_check.payable) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
             <p>품목 연결 검증: {% if transaction.cart_check.saved_products_status == 'matched' %}원문 상품 합계와 일치{% elif transaction.cart_check.saved_products_status == 'mismatch' %}원문 상품 합계와 불일치{% else %}원문 대조 불가{% endif %}</p>
             <p>상품·배송·할인과 결제 예정액 검증: {% if transaction.cart_check.payable_status == 'matched' %}원문 대조 일치{% elif transaction.cart_check.payable_status == 'mismatch' %}원문 대조 불일치{% else %}원문 대조 불가{% endif %}</p>

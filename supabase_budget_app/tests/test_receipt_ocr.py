@@ -47,9 +47,10 @@ class ReceiptOcrParsingTests(unittest.TestCase):
                                 ],
                                 "products_subtotal": "50400",
                                 "shipping": "3000",
-                                "discount": "0",
+                                "discount": "4510",
                                 "discount_present": True,
-                                "payable": "53400",
+                                "order_amount": "53400",
+                                "payable": "48890",
                             },
                             ensure_ascii=False,
                         )
@@ -70,7 +71,10 @@ class ReceiptOcrParsingTests(unittest.TestCase):
             [item["item_amount"] for item in result["items"]], [28800, 21600]
         )
         self.assertEqual(result["calculated_items_subtotal"], 50400)
-        self.assertEqual(result["calculated_payable"], 53400)
+        self.assertEqual(result["order_amount"], 53400)
+        self.assertEqual(result["calculated_order_amount"], 53400)
+        self.assertEqual(result["calculated_payable"], 48890)
+        self.assertEqual(result["order_amount_status"], "matched")
         self.assertIn("상품 카드", request["messages"][0]["content"])
 
     @patch("supabase_app.receipt_ocr.httpx.post")
@@ -230,7 +234,7 @@ class ReceiptOcrParsingTests(unittest.TestCase):
             "장바구니 목록\n바로구매\n옵션저장\n"
             "곰돌이푸 짝꿍 미니 수첩\n1,600원 18개 28,800원\n"
             "크리스마스 산타모자 산타분장\n1,200원 18개 21,600원\n"
-            "총 상품 금액 50,400원\n배송비 3,000원\n주문 금액 53,400원"
+            "총 상품 금액 50,400원\n배송비 3,000원\n주문 금액 53,400원\n결제 예정 금액 53,400원"
         )
 
         self.assertEqual(
@@ -246,6 +250,9 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         self.assertEqual(fields["calculated_items_subtotal"], 50400)
         self.assertEqual(fields["shipping"], 3000)
         self.assertEqual(fields["discount"], 0)
+        self.assertEqual(fields["order_amount"], 53400)
+        self.assertEqual(fields["calculated_order_amount"], 53400)
+        self.assertEqual(fields["order_amount_status"], "matched")
         self.assertEqual(fields["payable"], 53400)
         self.assertEqual(fields["calculated_payable"], 53400)
         self.assertEqual(fields["products_status"], "matched")
@@ -268,7 +275,7 @@ class ReceiptOcrParsingTests(unittest.TestCase):
                             '{"items":['
                             '{"description":"곰돌이푸 짝꿍 미니 수첩","option":"","package_size":"","order_quantity":"18","unit_price":"1600","item_amount":"28800","source_text":"1,600원 18개 28,800원","confidence":"high"},'
                             '{"description":"크리스마스 산타모자 산타분장","option":"","package_size":"","order_quantity":"18","unit_price":"1200","item_amount":"21600","source_text":"1,200원 18개 21,600원","confidence":"high"}'
-                            '],"products_subtotal":"50400","shipping":"3000","discount":"0","discount_present":true,"payable":"53400"}'
+                            '],"products_subtotal":"50400","shipping":"3000","discount":"4510","discount_present":true,"order_amount":"53400","payable":"48890"}'
                         )
                     }
                 }
@@ -288,6 +295,9 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         )
         self.assertEqual(result["products_status"], "matched")
         self.assertEqual(result["payable_status"], "matched")
+        self.assertEqual(result["order_amount"], 53400)
+        self.assertEqual(result["calculated_order_amount"], 53400)
+        self.assertEqual(result["order_amount_status"], "matched")
         self.assertEqual(
             post.call_args.args[0],
             "https://api.upstage.ai/v1/information-extraction/chat/completions",
