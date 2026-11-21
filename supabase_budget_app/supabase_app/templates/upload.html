@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}영수증 업로드 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📎 영수증 업로드</h2>
+    {% if review %}
+    <p class="text-muted" style="margin-bottom:16px;">품목별 내역과 카드 결제액을 따로 읽었습니다. 주소·배송 문구는 품목에서 제외했습니다.</p>
+    {% if review["items"] %}
+    <div class="alert alert-success">{{ review["items"]|length }}개 품목을 읽었습니다.</div>
+    {% else %}
+    <div class="alert alert-error">품목을 찾지 못했습니다. 품목과 금액이 선명하게 보이도록 다시 촬영해 주세요.</div>
+    {% endif %}
+    <form method="post" style="max-width: 600px;">
+        <div class="form-group">
+            <label for="budget_id">예산 *</label>
+            <select id="budget_id" disabled>
+                {% for b in budgets %}
+                <option value="{{ b.id }}" {% if b.id == review.budget_id %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% if review["items"] %}
+        <div style="overflow-x:auto;margin:16px 0;">
+            <table>
+                <thead><tr><th>품목</th><th>수량</th><th>단가</th><th>금액</th><th></th></tr></thead>
+                <tbody>
+                    {% for item in review["items"] %}
+                    <tr>
+                        <td><input aria-label="{{ loop.index }}번 품목" name="item_description" value="{{ item.description }}" required style="min-width:140px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
+                        <td><input aria-label="{{ loop.index }}번 수량" type="number" name="item_quantity" min="1" step="1" value="{{ item.quantity }}" required style="width:76px;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
+                        <td>
+                            <input aria-label="{{ loop.index }}번 단가" type="number" name="item_unit_price" min="1" step="1" value="{{ item.unit_price or '' }}" required style="width:110px;padding:7px;border:1px solid #ddd;border-radius:5px;">
+                            {% if item.needs_review %}<small style="display:block;color:#a15c00;">가격/수량 확인</small>{% endif %}
+                        </td>
+                        <td><input aria-label="{{ loop.index }}번 금액" type="number" name="item_amount" min="1" step="1" value="{{ item.amount }}" required style="width:110px;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
+                        <td><button type="button" class="remove-item" aria-label="{{ loop.index }}번 품목 삭제" style="border:0;background:none;color:#b42318;cursor:pointer;">삭제</button></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="row" style="align-items:end;">
+            <div class="form-group">
+                <label for="receipt_total">최종 영수증 구매금액 (원)</label>
+                <input id="receipt_total" name="receipt_total" type="number" min="1" step="1" value="{{ values.get('receipt_total', review.amount) if values else review.amount }}" placeholder="영수증의 카드 실결제액" required>
+            </div>
+            <p style="font-weight:600;margin:0 0 14px;">품목 합계: <span id="items-total-display">{{ "{:,.0f}".format(review.items_total or 0) }}</span>원</p>
+        </div>
+        <div id="receipt-verification" role="status" aria-live="polite" style="padding:12px 14px;border-radius:6px;margin:0 0 16px;{% if review.total_difference == 0 and review.amount %}background:#e6f4ea;color:#1e6b3a;border:1px solid #b7e2c0;{% elif review.total_difference is not none %}background:#fce8e6;color:#8f2a1e;border:1px solid #f5c6b7;{% else %}background:#fff7e0;color:#765600;border:1px solid #f0d98b;{% endif %}">
+            <strong id="verification-title">{% if review.total_difference == 0 and review.amount %}검증 완료: 영수증 구매금액과 품목 합계가 일치합니다.{% elif review.total_difference is not none %}금액 불일치: 영수증과 품목 합계의 차이를 확인해 주세요.{% elif not review.amount %}비교 대기: 최종 영수증 구매금액을 읽지 못했습니다.{% else %}비교 대기: 품목 가격을 확인해 주세요.{% endif %}</strong>
+            <span id="verification-detail" style="display:block;margin-top:4px;">{% if review.total_difference is not none and review.total_difference != 0 %}차액 {{ "{:,.0f}".format(review.total_difference|abs) }}원{% elif review.amount and review.total_difference == 0 %}최종 영수증 구매금액 {{ "{:,.0f}".format(review.amount) }}원 = 품목 합계 {{ "{:,.0f}".format(review.items_total) }}원{% else %}영수증의 최종 결제 금액을 확인해 입력하면 품목 합계와 비교합니다.{% endif %}</span>
+        </div>
+        {% endif %}
+        <div class="text-muted" style="margin-bottom:12px;">
+            <p>영수증: {{ review.receipt_filename }}</p>
+            {% if review.additional_document_filename %}<p>추가 서류: {{ review.additional_document_filename }}</p>{% endif %}
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="submit" name="action" value="save" class="btn btn-primary" {% if not review["items"] %}disabled{% endif %}>품목 목록으로 등록</button>
+            <button type="submit" name="action" value="cancel" class="btn btn-secondary">다시 업로드</button>
+        </div>
+    </form>
+    {% if review["items"] %}
+    <script>
+        const totalInput = document.querySelector('#receipt_total');
+        const itemsTotalDisplay = document.querySelector('#items-total-display');
+        const verification = document.querySelector('#receipt-verification');
+        const verificationTitle = document.querySelector('#verification-title');
+        const verificationDetail = document.querySelector('#verification-detail');
+        const saveButton = document.querySelector('button[name="action"][value="save"]');
+        const formatWon = value => Math.round(value).toLocaleString('ko-KR');
+        function updateReceiptTotals() {
+            const itemRows = [...document.querySelectorAll('input[name="item_amount"]')];
+            const unresolved = itemRows.some(input => !input.value);
+            const itemsTotal = itemRows.reduce((sum, input) => sum + (Number(input.value) || 0), 0);
+            const receiptTotal = Number(totalInput.value) || 0;
+            const difference = receiptTotal - itemsTotal;
+            itemsTotalDisplay.textContent = formatWon(itemsTotal);
+            if (unresolved || !receiptTotal) {
+                verification.style.cssText = 'padding:12px 14px;border-radius:6px;margin:0 0 16px;background:#fff7e0;color:#765600;border:1px solid #f0d98b;';
+                verificationTitle.textContent = unresolved
+                    ? '비교 대기: 품목 가격을 확인해 주세요.'
+                    : '비교 대기: 최종 영수증 구매금액을 입력해 주세요.';
+                verificationDetail.textContent = `현재 확인된 품목 합계 ${formatWon(itemsTotal)}원`;
+            } else if (difference === 0) {
+                verification.style.cssText = 'padding:12px 14px;border-radius:6px;margin:0 0 16px;background:#e6f4ea;color:#1e6b3a;border:1px solid #b7e2c0;';
+                verificationTitle.textContent = '검증 완료: 영수증 구매금액과 품목 합계가 일치합니다.';
+                verificationDetail.textContent = `영수증 구매금액 ${formatWon(receiptTotal)}원 = 품목 합계 ${formatWon(itemsTotal)}원`;
+            } else {
+                verification.style.cssText = 'padding:12px 14px;border-radius:6px;margin:0 0 16px;background:#fce8e6;color:#8f2a1e;border:1px solid #f5c6b7;';
+                verificationTitle.textContent = '금액 불일치: 품목 내역이나 최종 영수증 구매금액을 확인해 주세요.';
+                verificationDetail.textContent = `영수증 ${formatWon(receiptTotal)}원 / 품목 합계 ${formatWon(itemsTotal)}원 / 차액 ${formatWon(Math.abs(difference))}원`;
+            }
+            saveButton.disabled = itemRows.length === 0 || unresolved || !receiptTotal;
+        }
+        document.querySelectorAll('.remove-item').forEach(button => {
+            button.addEventListener('click', () => {
+                button.closest('tr').remove();
+                updateReceiptTotals();
+            });
+        });
+        document.querySelectorAll('input[name="item_amount"]').forEach(input => input.addEventListener('input', updateReceiptTotals));
+        totalInput.addEventListener('input', updateReceiptTotals);
+        document.querySelectorAll('input[name="item_quantity"], input[name="item_unit_price"]').forEach(input => {
+            const update = () => {
+                const row = input.closest('tr');
+                const quantity = Number(row.querySelector('input[name="item_quantity"]').value) || 0;
+                const unitPrice = Number(row.querySelector('[name="item_unit_price"]').value) || 0;
+                row.querySelector('input[name="item_amount"]').value = quantity && unitPrice ? String(quantity * unitPrice) : '';
+                updateReceiptTotals();
+            };
+            input.addEventListener('input', update);
+            input.addEventListener('change', update);
+        });
+        updateReceiptTotals();
+    </script>
+    {% endif %}
+    {% else %}
+    <p class="text-muted" style="margin-bottom:16px;">영수증에서 품목별 주문 수량과 가격을 읽고, 실제 결제액을 따로 확인합니다.</p>
+    <form method="post" enctype="multipart/form-data" style="max-width: 600px;">
+        <div class="form-group">
+            <label for="budget_id">예산 *</label>
+            <select id="budget_id" name="budget_id" required>
+                <option value="">선택하세요</option>
+                {% for b in budgets %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="receipt_file">신용카드 영수증 *</label>
+            <div class="file-pick-row"><input type="file" id="receipt_file" name="receipt_file" accept=".png,.jpg,.jpeg,.heic,.pdf" required><button type="button" class="clear-file" aria-label="영수증 파일 선택 취소" title="선택 취소" hidden>×</button></div>
+            <p class="selected-file" id="receipt_file_name" aria-live="polite"></p>
+            <p class="text-muted">png, jpg, jpeg, heic, pdf 지원 (최대 10MB). 판독을 위해 Upstage로 전송됩니다.</p>
+        </div>
+        <div class="form-group">
+            <label for="additional_document">추가 서류 (선택)</label>
+            <div class="file-pick-row"><input type="file" id="additional_document" name="additional_document" accept=".png,.jpg,.jpeg,.heic,.pdf"><button type="button" class="clear-file" aria-label="추가 서류 파일 선택 취소" title="선택 취소" hidden>×</button></div>
+            <p class="selected-file" id="additional_document_name" aria-live="polite"></p>
+            <p class="text-muted">내역서나 견적서 중 1개를 더 첨부할 수 있습니다. OCR 판독 없이 보관합니다.</p>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="submit" name="action" value="parse" class="btn btn-primary">영수증 읽기</button>
+            <a href="{{ url_for('app.ledger') }}" class="btn btn-secondary">장부 보기</a>
+        </div>
+    </form>
+    <script>
+        document.querySelectorAll('.file-pick-row').forEach(row => {
+            const input = row.querySelector('input[type="file"]');
+            const clear = row.querySelector('.clear-file');
+            const selectedName = document.getElementById(input.id + '_name');
+            input.addEventListener('change', () => {
+                const selected = input.files && input.files[0];
+                selectedName.textContent = selected ? selected.name : '';
+                clear.hidden = !selected;
+            });
+            clear.addEventListener('click', () => {
+                input.value = '';
+                selectedName.textContent = '';
+                clear.hidden = true;
+                input.focus();
+            });
+        });
+    </script>
+    {% endif %}
+</div>
+{% endblock %}

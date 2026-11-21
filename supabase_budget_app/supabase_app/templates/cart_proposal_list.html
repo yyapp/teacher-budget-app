@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}품의 초안 목록 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>📋 품의 초안 목록</h2>
+        <a href="{{ url_for('app.cart_review') }}" class="btn btn-primary">+ 새 품의</a>
+    </div>
+    {% if proposals %}
+    <table>
+        <thead>
+            <tr><th>일시</th><th>품목 수</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for p in proposals %}
+            <tr>
+                <td>{{ p.created_at[:10] if p.created_at else '-' }}</td>
+                <td>{{ p.items|length }}개</td>
+                <td>
+                    <a href="{{ url_for('app.cart_proposal_view', proposal_id=p.id) }}" class="btn btn-secondary" style="padding:4px 8px;font-size:0.8rem;">보기·복사</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">저장된 품의 초안이 없습니다. <a href="{{ url_for('app.cart_review') }}">장바구니 검토</a>에서 만들어 보세요.</div>
+    {% endif %}
+</div>
+{% endblock %}

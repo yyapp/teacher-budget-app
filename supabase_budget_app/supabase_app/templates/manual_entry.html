@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}수기 입력 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>✏️ 수기 입력 (영수증 없이)</h2>
+    <p class="text-muted" style="margin-bottom:16px;">영수증이 없는 경우나 간단히 입력할 때 사용합니다.</p>
+
+    <form method="post" style="max-width: 500px;">
+        <div class="form-group">
+            <label for="budget_id">예산 *</label>
+            <select id="budget_id" name="budget_id" required>
+                <option value="">선택하세요</option>
+                {% for b in budgets %}
+                <option value="{{ b.id }}">{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="description">설명 *</label>
+            <input type="text" id="description" name="description" required placeholder="예: 온라인 강의 수강료">
+        </div>
+        <div class="row">
+            <div class="form-group">
+                <label for="amount">금액 (원) *</label>
+                <input type="number" id="amount" name="amount" required min="0" step="100" placeholder="예: 30000">
+            </div>
+            <div class="form-group">
+                <label for="quantity">수량</label>
+                <input type="number" id="quantity" name="quantity" min="1" value="1">
+            </div>
+        </div>
+        <div class="row">
+            <div class="form-group">
+                <label for="unit_price">단가 (선택)</label>
+                <input type="number" id="unit_price" name="unit_price" min="0" step="100" placeholder="예: 30000">
+            </div>
+            <div class="form-group">
+                <label for="category">분류</label>
+                <input type="text" id="category" name="category" placeholder="예: 교육">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="notes">메모</label>
+            <textarea id="notes" name="notes" rows="2" placeholder="예: 3개월 이용권"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="submit" class="btn btn-primary">등록</button>
+            <a href="{{ url_for('app.ledger') }}" class="btn btn-secondary">장부 보기</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

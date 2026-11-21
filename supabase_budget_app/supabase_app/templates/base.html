@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}예산·구매 도우미{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+        .container { max-width: 960px; margin: 0 auto; padding: 20px; }
+        header { background: #fff; border-bottom: 1px solid #ddd; padding: 12px 0; margin-bottom: 20px; }
+        header .container { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        header h1 { font-size: 1.2rem; font-weight: 600; }
+        nav { display: flex; gap: 8px; flex-wrap: wrap; }
+        nav a { text-decoration: none; color: #555; padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; }
+        nav a:hover, nav a.active { background: #e8f0fe; color: #1a73e8; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .card h2 { font-size: 1.1rem; margin-bottom: 12px; }
+        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 0.95rem; }
+        .alert-success { background: #e6f4ea; color: #1e6b3a; border: 1px solid #b7e2c0; }
+        .alert-error { background: #fce8e6; color: #8f2a1e; border: 1px solid #f5c6b7; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; }
+        .btn { display: inline-block; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; text-decoration: none; }
+        .btn-primary { background: #1a73e8; color: #fff; }
+        .btn-primary:hover { background: #1557b0; }
+        .btn-secondary { background: #e8e8e8; color: #333; }
+        .btn-secondary:hover { background: #d4d4d4; }
+        .btn-danger { background: #d93025; color: #fff; }
+        .btn-danger:hover { background: #b71c1c; }
+        .btn-success { background: #1e8e3e; color: #fff; }
+        .btn-success:hover { background: #136c2e; }
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: 500; font-size: 0.9rem; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; background: #fff;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.15); }
+        .file-pick-row { display: flex; align-items: center; gap: 6px; }
+        .file-pick-row input[type="file"] { min-width: 0; flex: 1; }
+        .clear-file { width: 26px; height: 26px; flex: 0 0 26px; border: 1px solid #d0d5dd; border-radius: 50%; background: #fff; color: #667085; font-size: 17px; line-height: 20px; cursor: pointer; }
+        .clear-file:hover { background: #f2f4f7; color: #b42318; }
+        .selected-file { min-height: 0; color: #667085; font-size: 0.82rem; overflow-wrap: anywhere; }
+        .row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .row > * { flex: 1; min-width: 140px; }
+        .text-right { text-align: right; }
+        .text-muted { color: #888; font-size: 0.85rem; }
+        .empty { text-align: center; padding: 30px; color: #888; }
+        .copy-btn { position: relative; }
+        .copy-btn::after { content: '복사됨'; position: absolute; top: 100%; left: 0; background: #1e6b3a; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        .copy-btn.show-copy::after { opacity: 1; }
+        .footer { text-align: center; padding: 20px; color: #888; font-size: 0.8rem; margin-top: 30px; border-top: 1px solid #eee; }
+        @media (max-width: 600px) { header .container { flex-direction: column; align-items: flex-start; } }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>💰 예산·구매 도우미</h1>
+            <nav>
+                <a href="{{ url_for('app.index') }}" {% if request.path == url_for('app.index') %}class="active"{% endif %}>홈</a>
+                <a href="{{ url_for('app.budgets') }}" {% if 'budgets' in request.path %}class="active"{% endif %}>예산</a>
+                <a href="{{ url_for('app.upload') }}" {% if request.path == url_for('app.upload') %}class="active"{% endif %}>영수증</a>
+                <a href="{{ url_for('app.ledger') }}" {% if request.path == url_for('app.ledger') %}class="active"{% endif %}>장부</a>
+                <a href="{{ url_for('app.manual_entry') }}" {% if request.path == url_for('app.manual_entry') %}class="active"{% endif %}>수기입력</a>
+                <a href="{{ url_for('app.cart_review') }}" {% if request.path == url_for('app.cart_review') %}class="active"{% endif %}>장바구니</a>
+            </nav>
+        </div>
+    </header>
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+    <div class="footer">개인용 예산·구매 서류 도우미 · Supabase + Flask</div>
+</body>
+</html>

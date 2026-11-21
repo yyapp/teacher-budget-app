@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}로그인 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 400px; margin: 40px auto;">
+    <h2>🔒 로그인</h2>
+    <form method="post">
+        <div class="form-group">
+            <label>비밀번호</label>
+            <input type="password" name="password" required placeholder="비밀번호를 입력하세요">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">로그인</button>
+    </form>
+    <p class="text-muted" style="margin-top: 16px;">※ 환경변수에 ACCESS_PASSWORD가 설정된 경우에만 표시됩니다.</p>
+</div>
+{% endblock %}

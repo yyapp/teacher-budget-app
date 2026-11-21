@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}환불 처리 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>🔄 환불 처리</h2>
+    <div style="margin-bottom:16px;">
+        <a href="{{ url_for('app.ledger') }}" class="btn btn-secondary">← 장부로 돌아가기</a>
+    </div>
+    <div class="card" style="background:#f8f9fa;margin-bottom:20px;">
+        <p>환불할 거래: <strong>{{ transaction.description }}</strong> ({{ "{:,.0f}".format(transaction.amount) }}원, 상태: {{ transaction.status }})</p>
+    </div>
+    <form method="post">
+        <div class="form-group">
+            <label for="refund_amount">환불 금액 (원) *</label>
+            <input type="number" id="refund_amount" name="refund_amount" required min="0" step="100" value="{{ transaction.amount }}" placeholder="예: 45000">
+        </div>
+        <div class="form-group">
+            <label for="reason">환불 사유</label>
+            <textarea id="reason" name="reason" rows="3" placeholder="예:구매 취소, 상품 불량">{{ request.form.get('reason', '') }}</textarea>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="submit" class="btn btn-primary">환불 처리</button>
+            <a href="{{ url_for('app.ledger') }}" class="btn btn-secondary">취소</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

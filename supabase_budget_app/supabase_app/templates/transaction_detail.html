@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}거래 상세 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📄 거래 상세</h2>
+    <div style="margin-bottom:16px;">
+        <a href="{{ url_for('app.ledger') }}" class="btn btn-secondary">← 장부로 돌아가기</a>
+    </div>
+    <table>
+        <tr><th style="width:140px;">설명</th><td>{{ transaction.description }}</td></tr>
+        <tr><th>예산 ID</th><td>{{ transaction.budget_id }}</td></tr>
+        <tr><th>금액</th><td>{{ "{:,.0f}".format(transaction.amount) }}원</td></tr>
+        <tr><th>수량</th><td>{{ transaction.quantity }}</td></tr>
+        <tr><th>단가</th><td>{% if transaction.unit_price %}{{ "{:,.0f}".format(transaction.unit_price) }}원{% else %}(없음){% endif %}</td></tr>
+        <tr><th>분류</th><td>{{ transaction.category or '-' }}</td></tr>
+        <tr><th>상태</th>
+            <td>
+                <span class="tag" style="display:inline-block;padding:4px 12px;border-radius:6px;font-size:0.9rem;
+                    {% if transaction.status == 'confirmed' %}background:#e6f4ea;color:#1e6b3a
+                    {% elif transaction.status == 'cancelled' %}background:#fce8e6;color:#8f2a1e
+                    {% elif transaction.status == 'refunded' %}background:#fff3cd;color:#856404
+                    {% else %}background:#e8e8e8;color:#333{% endif %}">
+                    {{ transaction.status }}
+                </span>
+            </td>
+        </tr>
+        {% if transaction.refund_amount %}
+        <tr><th>환불 금액</th><td>{{ "{:,.0f}".format(transaction.refund_amount) }}원</td></tr>
+        <tr><th>환불 사유</th><td>{{ transaction.refund_reason or '-' }}</td></tr>
+        {% endif %}
+        <tr><th>메모</th><td>{{ transaction.notes or '-' }}</td></tr>
+        <tr><th>등록일시</th><td>{{ transaction.created_at if transaction.created_at else '-' }}</td></tr>
+        <tr><th>수정일시</th><td>{{ transaction.updated_at if transaction.updated_at else '-' }}</td></tr>
+    </table>
+
+    {% if transaction.line_items %}
+    <div style="margin-top:20px;overflow-x:auto;">
+        <h3 style="margin-bottom:10px;">품목 내역</h3>
+        {% if transaction.receipt_check %}
+        <div role="status" style="padding:12px 14px;border-radius:6px;margin:0 0 12px;{% if not transaction.receipt_check.verified %}background:#fff7e0;color:#765600;border:1px solid #f0d98b;{% elif transaction.receipt_check.difference == 0 %}background:#e6f4ea;color:#1e6b3a;border:1px solid #b7e2c0;{% else %}background:#fce8e6;color:#8f2a1e;border:1px solid #f5c6b7;{% endif %}">
+            {% if not transaction.receipt_check.verified %}
+            비교 불가: 영수증에서 최종 결제액을 읽지 못해 장바구니 금액 {{ "{:,.0f}".format(transaction.receipt_check.receipt_total) }}원을 사용했습니다.
+            {% elif transaction.receipt_check.difference == 0 %}
+            검증 완료: 최종 영수증 구매금액 {{ "{:,.0f}".format(transaction.receipt_check.receipt_total) }}원과 품목 합계 {{ "{:,.0f}".format(transaction.receipt_check.items_total) }}원이 일치합니다.
+            {% else %}
+            금액 불일치: 영수증 구매금액 {{ "{:,.0f}".format(transaction.receipt_check.receipt_total) }}원, 품목 합계 {{ "{:,.0f}".format(transaction.receipt_check.items_total) }}원, 차액 {{ "{:,.0f}".format(transaction.receipt_check.difference|abs) }}원입니다.
+            {% endif %}
+        </div>
+        {% endif %}
+        <table>
+            <thead><tr><th>품목</th><th class="text-right">수량</th><th class="text-right">단가</th><th class="text-right">금액</th></tr></thead>
+            <tbody>
+                {% for item in transaction.line_items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td class="text-right">{{ item.quantity }}</td>
+                    <td class="text-right">{{ "{:,.0f}".format(item.unit_price) }}원</td>
+                    <td class="text-right">{{ "{:,.0f}".format(item.amount) }}원</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if transaction.receipt_path or transaction.additional_document_path %}
+    <div id="evidence" style="margin-top:16px;">
+        <h3>📎 첨부 파일</h3>
+        {% if transaction.receipt_path %}
+        <p style="margin-top:8px;">신용카드 영수증: {{ transaction.receipt_filename or '영수증' }}</p>
+        {% if transaction.receipt_url %}
+        <a href="{{ transaction.receipt_url }}" target="_blank" rel="noopener" class="btn btn-primary">영수증 보기</a>
+        {% endif %}
+        {% endif %}
+        {% if transaction.additional_document_path %}
+        <p style="margin-top:12px;">내역서 / 견적서: {{ transaction.additional_document_filename or '추가 서류' }}</p>
+        {% if transaction.additional_document_url %}
+        <a href="{{ transaction.additional_document_url }}" target="_blank" rel="noopener" class="btn btn-secondary">추가 서류 보기</a>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+        {% if transaction.status == 'draft' %}
+        <form method="post" action="{{ url_for('app.transaction_confirm', tx_id=transaction.id) }}" style="display:inline;">
+            <button type="submit" class="btn btn-success">확정하기</button>
+        </form>
+        <form method="post" action="{{ url_for('app.transaction_cancel', tx_id=transaction.id) }}" style="display:inline;" onsubmit="return confirm('취소하시겠습니까?');">
+            <button type="submit" class="btn btn-danger">취소하기</button>
+        </form>
+        {% elif transaction.status == 'confirmed' %}
+        <a href="{{ url_for('app.transaction_refund', tx_id=transaction.id) }}" class="btn btn-secondary">환불 처리</a>
+        {% endif %}
+        {% if transaction.status in ('draft',) %}
+        <a href="{{ url_for('app.transaction_edit', tx_id=transaction.id) }}" class="btn btn-secondary">수정</a>
+        <form method="post" action="{{ url_for('app.transaction_delete', tx_id=transaction.id) }}" style="display:inline;" onsubmit="return confirm('이 거래를 삭제하시겠습니까?');">
+            <button type="submit" class="btn btn-danger">삭제</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}홈 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📊 예산 현황</h2>
+    {% if budgets %}
+    <table>
+        <thead>
+            <tr><th>예산 이름</th><th class="text-right">예산 금액</th><th class="text-right">잔액</th></tr>
+        </thead>
+        <tbody>
+            {% for b in budgets %}
+            <tr>
+                <td>{{ b.name }}</td>
+                <td class="text-right">{{ "{:,.0f}".format(b.amount) }}원</td>
+                <td class="text-right" style="font-weight: 500; color: {{ 'green' if b.balance >= 0 else 'red' }}">{{ "{:,.0f}".format(b.balance) }}원</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">등록된 예산이 없습니다. <a href="{{ url_for('app.budget_new') }}">예산 등록하기</a></div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>📝 최근 거래</h2>
+    {% if recent_transactions %}
+    <table>
+        <thead>
+            <tr><th>일시</th><th>설명</th><th>예산</th><th class="text-right">금액</th><th>상태</th></tr>
+        </thead>
+        <tbody>
+            {% for tx in recent_transactions %}
+            <tr>
+                <td>{{ tx.created_at[:10] if tx.created_at else '-' }}</td>
+                <td>{{ tx.description }}</td>
+                <td>{{ tx.budget_id }}</td>
+                <td class="text-right">{{ "{:,.0f}".format(tx.amount) }}원</td>
+                <td>
+                    <span class="tag" style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.8rem;
+                        {% if tx.status == 'confirmed' %}background:#e6f4ea;color:#1e6b3a
+                        {% elif tx.status == 'cancelled' %}background:#fce8e6;color:#8f2a1e
+                        {% elif tx.status == 'refunded' %}background:#fff3cd;color:#856404
+                        {% else %}background:#e8e8e8;color:#333{% endif %}">
+                        {{ tx.status }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">최근 거래가 없습니다.</div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>⚡ 빠른 메뉴</h2>
+    <div class="row">
+        <a href="{{ url_for('app.budget_new') }}" class="btn btn-primary">예산 등록</a>
+        <a href="{{ url_for('app.upload') }}" class="btn btn-primary">영수증 업로드</a>
+        <a href="{{ url_for('app.manual_entry') }}" class="btn btn-secondary">수기 입력</a>
+        <a href="{{ url_for('app.cart_review') }}" class="btn btn-secondary">장바구니</a>
+    </div>
+</div>
+{% endblock %}

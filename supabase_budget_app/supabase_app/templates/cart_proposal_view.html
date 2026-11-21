@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}품의 초안 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>📋 품의 초안</h2>
+    <div style="margin-bottom:16px;">
+        <a href="{{ url_for('app.cart_proposal_list') }}" class="btn btn-secondary">← 목록으로</a>
+        <a href="{{ url_for('app.cart_review') }}" class="btn btn-secondary">새 품의 만들기</a>
+    </div>
+
+    <div class="card" style="background:#f8f9fa;margin-bottom:16px;">
+        <h3>📦 품목</h3>
+        <table style="margin-top:8px;">
+            <thead>
+                <tr><th>설명</th><th class="text-right">수량</th><th class="text-right">단가</th><th class="text-right">금액</th></tr>
+            </thead>
+            <tbody>
+                {% for item in proposal.items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td class="text-right">{{ item.quantity }}</td>
+                    <td class="text-right">{{ "{:,.0f}".format(item.unit_price) }}원</td>
+                    <td class="text-right" style="font-weight:500;">{{ "{:,.0f}".format(item.amount) }}원</td>
+                </tr>
+                {% endfor %}
+                <tr style="background:#fff;border-top:2px solid #ddd;font-weight:600;">
+                    <td colspan="3" class="text-right">합계</td>
+                    <td class="text-right">{{ "{:,.0f}".format(proposal.items|sum(attribute='amount')) }}원</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    {% if proposal.notes %}
+    <div class="card" style="background:#f8f9fa;margin-bottom:16px;">
+        <h3>📝 메모</h3>
+        <p>{{ proposal.notes }}</p>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>📄 복사할 코드</h3>
+        <p class="text-muted" style="margin-bottom:8px;">아래 JSON을 복사해서 품의 시트에 붙여넣으세요.</p>
+
+        <pre id="json-output" style="background:#f5f5f5;padding:14px;border-radius:6px;overflow-x:auto;font-size:0.85rem;cursor:pointer;" title="클릭하면 복사됩니다">{{ proposal.items | tojson(indent=2) }}</pre>
+
+        <div style="margin-top:10px;">
+            <button onclick="copyJson()" class="btn btn-primary">JSON 복사</button>
+            <span id="copy-msg" style="margin-left:10px;color:#1e6b3a;display:none;">복사됨!</span>
+        </div>
+
+        <h4 style="margin-top:20px;">텍스트 형식</h4>
+        <pre id="text-output" style="background:#f5f5f5;padding:14px;border-radius:6px;overflow-x:auto;font-size:0.85rem;cursor:pointer;" title="클릭하면 복사됩니다">{% for item in proposal.items %}{{ item.description }}: {{ item.quantity }}개 × {{ "{:,.0f}".format(item.unit_price) }}원 = {{ "{:,.0f}".format(item.amount) }}원{% if not loop.last %}\n{% endif %}{% endfor %}</pre>
+
+        <div style="margin-top:10px;">
+            <button onclick="copyText()" class="btn btn-secondary">텍스트 복사</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    function copyJson() {
+        const text = document.getElementById('json-output').textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            const msg = document.getElementById('copy-msg');
+            msg.style.display = 'inline';
+            setTimeout(() => { msg.style.display = 'none'; }, 2000);
+        });
+    }
+    function copyText() {
+        const text = document.getElementById('text-output').textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            const msg = document.getElementById('copy-msg');
+            msg.style.display = 'inline';
+            msg.textContent = '텍스트 복사됨!';
+            setTimeout(() => { msg.style.display = 'none'; }, 2000);
+        });
+    }
+</script>
+{% endblock %}

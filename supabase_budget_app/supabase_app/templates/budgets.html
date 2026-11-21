@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}예산 목록 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2>📋 예산 목록</h2>
+        <a href="{{ url_for('app.budget_new') }}" class="btn btn-primary">+ 예산 등록</a>
+    </div>
+    {% if budgets %}
+    <table>
+        <thead>
+            <tr><th>이름</th><th>분류</th><th class="text-right">금액</th><th class="text-right">잔액</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for b in budgets %}
+            <tr>
+                <td><a href="{{ url_for('app.budget_edit', budget_id=b.id) }}" style="color:#1a73e8;text-decoration:none;font-weight:500;">{{ b.name }}</a></td>
+                <td>{{ b.category or '-' }}</td>
+                <td class="text-right">{{ "{:,.0f}".format(b.amount) }}원</td>
+                <td class="text-right" style="font-weight: 500; color: {{ 'green' if b.balance >= 0 else 'red' }}">{{ "{:,.0f}".format(b.balance) }}원</td>
+                <td>
+                    <a href="{{ url_for('app.budget_edit', budget_id=b.id) }}" class="btn btn-secondary" style="padding:4px 8px;font-size:0.8rem;">수정</a>
+                    <form method="post" action="{{ url_for('app.budget_delete', budget_id=b.id) }}" style="display:inline;" onsubmit="return confirm('이 예산을 삭제하시겠습니까?');">
+                        <button type="submit" class="btn btn-danger" style="padding:4px 8px;font-size:0.8rem;">삭제</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">등록된 예산이 없습니다. <a href="{{ url_for('app.budget_new') }}">첫 예산을 등록해 보세요.</a></div>
+    {% endif %}
+</div>
+{% endblock %}

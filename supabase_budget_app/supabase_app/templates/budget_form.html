@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} 예산 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>{{ action }} 예산</h2>
+    <form method="post">
+        <div class="form-group">
+            <label for="name">예산 이름 *</label>
+            <input type="text" id="name" name="name" value="{{ budget.name if budget else '' }}" required placeholder="예: 2026년 1학기 교재비">
+        </div>
+        <div class="row">
+            <div class="form-group">
+                <label for="amount">예산 금액 (원) *</label>
+                <input type="number" id="amount" name="amount" value="{{ budget.amount if budget else '' }}" required min="0" step="100" placeholder="예: 500000">
+            </div>
+            <div class="form-group">
+                <label for="category">분류</label>
+                <input type="text" id="category" name="category" value="{{ budget.category if budget else '' }}" placeholder="예: 교재, 사무용품">
+            </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="submit" class="btn btn-primary">{{ action }}</button>
+            <a href="{{ url_for('app.budgets') }}" class="btn btn-secondary">취소</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}장바구니 검토 — 예산·구매 도우미{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>🛒 장바구니 이미지 검토</h2>
+    {% if not review %}
+    <p class="text-muted" style="margin-bottom:16px;">장바구니 화면을 복사해 아래 상자에 붙여넣거나, 이미지 파일을 선택해 주세요.</p>
+    <form method="post" enctype="multipart/form-data" id="cart-image-form" style="max-width:680px;">
+        <input type="hidden" name="action" value="parse">
+        <div class="form-group">
+            <label for="budget_id">예산 *</label>
+            <select id="budget_id" name="budget_id" required>
+                <option value="">예산을 선택하세요</option>
+                {% for budget in budgets %}<option value="{{ budget.id }}">{{ budget.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div id="paste-zone" tabindex="0" role="button" aria-label="장바구니 이미지 붙여넣기 영역" style="padding:28px 16px;border:2px dashed #aab4c3;border-radius:10px;background:#f8fafc;text-align:center;color:#475467;cursor:pointer;">
+            <strong>이미지 붙여넣기</strong>
+            <span style="display:block;margin-top:5px;font-size:.9rem;">이 상자를 누르고 Ctrl+V (Mac은 ⌘V)를 누르세요.</span>
+            <span id="paste-status" style="display:block;margin-top:8px;color:#1e6b3a;"></span>
+        </div>
+        <div class="form-group" style="margin-top:14px;">
+            <label for="cart_image">또는 이미지 파일 선택 *</label>
+            <div class="file-pick-row">
+                <input type="file" id="cart_image" name="cart_image" accept="image/png,image/jpeg,.png,.jpg,.jpeg,.pdf">
+                <button type="button" class="clear-file" aria-label="장바구니 이미지 선택 취소" title="선택 취소" hidden>×</button>
+            </div>
+            <p id="cart_image_name" class="selected-file" aria-live="polite"></p>
+            <p class="text-muted">PNG, JPG, PDF 지원 (최대 10MB). 이미지는 품목을 읽는 데만 사용됩니다.</p>
+        </div>
+        <div class="form-group">
+            <label for="notes">메모 (선택)</label>
+            <textarea id="notes" name="notes" rows="2" placeholder="예: 1학기 교재 구매"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">이미지에서 품목 읽기</button>
+    </form>
+    <script>
+        const cartImage = document.querySelector('#cart_image');
+        const pasteZone = document.querySelector('#paste-zone');
+        const pasteStatus = document.querySelector('#paste-status');
+        const clearButton = document.querySelector('.clear-file');
+        const imageName = document.querySelector('#cart_image_name');
+        function showSelectedImage(file) {
+            imageName.textContent = file ? file.name : '';
+            clearButton.hidden = !file;
+            pasteStatus.textContent = file ? '이미지를 받았습니다. 품목 읽기를 눌러 주세요.' : '';
+        }
+        cartImage.addEventListener('change', () => showSelectedImage(cartImage.files[0]));
+        clearButton.addEventListener('click', () => {
+            cartImage.value = '';
+            showSelectedImage(null);
+            cartImage.focus();
+        });
+        pasteZone.addEventListener('click', () => pasteZone.focus());
+        document.addEventListener('paste', event => {
+            if (!pasteZone.matches(':focus')) return;
+            const image = [...(event.clipboardData?.items || [])]
+                .find(item => item.type.startsWith('image/'))?.getAsFile();
+            if (!image) {
+                pasteStatus.textContent = '클립보드에 이미지가 없습니다. 이미지를 복사한 뒤 다시 붙여넣어 주세요.';
+                return;
+            }
+            const extension = image.type.split('/')[1] === 'jpeg' ? 'jpg' : image.type.split('/')[1];
+            const pastedFile = new File([image], `cart-image.${extension}`, { type: image.type });
+            const transfer = new DataTransfer();
+            transfer.items.add(pastedFile);
+            cartImage.files = transfer.files;
+            showSelectedImage(pastedFile);
+            event.preventDefault();
+        });
+        document.querySelector('#cart-image-form').addEventListener('submit', event => {
+            if (!cartImage.files.length) {
+                event.preventDefault();
+                pasteStatus.textContent = '먼저 이미지 붙여넣기 상자를 누른 뒤 이미지를 붙여넣어 주세요.';
+            }
+        });
+    </script>
+    {% else %}
+    <p class="text-muted" style="margin-bottom:14px;">주문 수량은 품목명에 함께 적고, 장부 수량은 1로 저장합니다. 이미지에 표시된 품목 줄 금액을 그대로 사용합니다.</p>
+    <form method="post" enctype="multipart/form-data" id="cart-review-form">
+        <div class="form-group" style="max-width:460px;">
+            <label for="budget_id_review">예산</label>
+            <select id="budget_id_review" disabled>
+                {% for budget in budgets %}<option value="{{ budget.id }}" {% if budget.id == review.budget_id %}selected{% endif %}>{{ budget.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div style="overflow-x:auto;margin:16px 0;">
+            <table>
+                <thead><tr><th>품목 (주문 수량 포함)</th><th>장부 수량</th><th>품목 금액</th><th></th></tr></thead>
+                <tbody id="cart-items">
+                {% for item in review["items"] %}
+                    <tr>
+                        <td><input name="item_description" aria-label="{{ loop.index }}번 품목" value="{{ item.description }}" required style="min-width:180px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
+                        <td><input name="item_quantity" aria-label="{{ loop.index }}번 장부 수량" type="number" value="1" readonly style="width:60px;padding:7px;border:1px solid #ddd;border-radius:5px;background:#f5f5f5;"></td>
+                        <td>
+                            <input name="item_amount" aria-label="{{ loop.index }}번 품목 합계" type="number" min="1" step="1" value="{{ item.amount or '' }}" required style="width:130px;padding:7px;border:1px solid #ddd;border-radius:5px;">
+                        </td>
+                        <td><button type="button" class="remove-cart-item btn btn-secondary" aria-label="{{ loop.index }}번 품목 삭제" style="padding:5px 8px;">삭제</button></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="row" style="align-items:end;">
+            <div class="form-group">
+                <label for="cart_total">{% if review.total_source == 'image' %}이미지에서 읽은 최종 구매금액{% else %}계산된 최종 구매금액{% endif %}</label>
+                <input id="cart_total" name="cart_total" type="number" min="1" step="1" value="{{ review.receipt_total or '' }}" {% if review.total_source == 'calculated' %}readonly{% endif %} required>
+            </div>
+            <p style="font-weight:600;margin:0 0 14px;">품목 합계: <span id="cart-items-total">{{ "{:,.0f}".format(review.items_total) }}</span>원</p>
+        </div>
+        <div id="cart-check" role="status" aria-live="polite" class="alert alert-error">검증 대기</div>
+        {% if review.total_source == 'calculated' %}<p class="text-muted" style="margin:-8px 0 14px;">이미지에서 최종 결제액을 찾지 못해 품목 줄의 금액을 자동 합산했습니다. 구매 완료 시 영수증에서 실제 결제액을 확인할 수 있습니다.</p>{% endif %}
+        <div class="form-group" style="max-width:560px;">
+            <label for="cart-notes">메모</label>
+            <textarea id="cart-notes" name="notes" rows="2">{{ review.notes }}</textarea>
+        </div>
+        <div class="row">
+            <div class="form-group">
+                <label for="purchase_receipt">영수증 (구매 완료 시 필수)</label>
+                <div class="file-pick-row"><input type="file" id="purchase_receipt" name="purchase_receipt" accept=".png,.jpg,.jpeg,.heic,.pdf"><button type="button" class="clear-file" aria-label="영수증 선택 취소" hidden>×</button></div>
+                <p id="purchase_receipt_name" class="selected-file"></p>
+            </div>
+            <div class="form-group">
+                <label for="purchase_statement">내역서 (선택)</label>
+                <div class="file-pick-row"><input type="file" id="purchase_statement" name="purchase_statement" accept=".png,.jpg,.jpeg,.heic,.pdf"><button type="button" class="clear-file" aria-label="내역서 선택 취소" hidden>×</button></div>
+                <p id="purchase_statement_name" class="selected-file"></p>
+            </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+            <button type="submit" name="action" value="requisition" class="btn btn-primary">품의 완료</button>
+            <button type="submit" name="action" value="purchase" class="btn btn-success">구매 완료</button>
+            <button type="submit" name="action" value="cancel" formnovalidate class="btn btn-secondary">다시 시작</button>
+        </div>
+    </form>
+    <script>
+        const reviewForm = document.querySelector('#cart-review-form');
+        const cartTotal = document.querySelector('#cart_total');
+        const checkBox = document.querySelector('#cart-check');
+        const buttons = [...reviewForm.querySelectorAll('button[name="action"]')];
+        const formatMoney = amount => Math.round(amount).toLocaleString('ko-KR');
+        function verifyCart() {
+            const rows = [...document.querySelectorAll('#cart-items tr')];
+            let unresolved = false;
+            let sum = 0;
+            for (const row of rows) {
+                const amountInput = row.querySelector('[name="item_amount"]');
+                const quantity = Number(row.querySelector('[name="item_quantity"]').value) || 0;
+                const amount = Number(amountInput.value) || 0;
+                if (!amountInput.value || !quantity) unresolved = true;
+                sum += amount;
+            }
+            if (cartTotal.readOnly) cartTotal.value = String(sum || '');
+            const total = Number(cartTotal.value) || 0;
+            document.querySelector('#cart-items-total').textContent = formatMoney(sum);
+            if (unresolved || !total) {
+                checkBox.className = 'alert alert-error';
+                checkBox.textContent = unresolved ? '검증 대기: 품목 금액을 확인해 주세요.' : '검증 대기: 최종 구매금액을 확인해 주세요.';
+            } else if (sum === total) {
+                checkBox.className = 'alert alert-success';
+                checkBox.textContent = `검증 완료: 구매금액 ${formatMoney(total)}원과 품목 합계가 일치합니다.`;
+            } else {
+                checkBox.className = 'alert alert-error';
+                checkBox.textContent = `금액 불일치: 구매금액 ${formatMoney(total)}원, 품목 합계 ${formatMoney(sum)}원, 차액 ${formatMoney(Math.abs(total - sum))}원입니다.`;
+            }
+            buttons.forEach(button => button.disabled = unresolved || !total || !rows.length || sum !== total);
+        }
+        reviewForm.addEventListener('input', verifyCart);
+        reviewForm.addEventListener('change', verifyCart);
+        document.querySelectorAll('.remove-cart-item').forEach(button => button.addEventListener('click', () => {
+            button.closest('tr').remove();
+            verifyCart();
+        }));
+        reviewForm.addEventListener('submit', event => {
+            const submitter = event.submitter;
+            if (submitter?.value === 'purchase' && !document.querySelector('#purchase_receipt').files.length) {
+                event.preventDefault();
+                checkBox.className = 'alert alert-error';
+                checkBox.textContent = '구매 완료에는 영수증을 첨부해 주세요.';
+                document.querySelector('#purchase_receipt').focus();
+            }
+        });
+        document.querySelectorAll('.file-pick-row').forEach(row => {
+            const input = row.querySelector('input[type="file"]');
+            const clear = row.querySelector('.clear-file');
+            const label = document.getElementById(input.id + '_name');
+            input.addEventListener('change', () => {
+                label.textContent = input.files[0]?.name || '';
+                clear.hidden = !input.files.length;
+            });
+            clear.addEventListener('click', () => {
+                input.value = '';
+                label.textContent = '';
+                clear.hidden = true;
+            });
+        });
+        verifyCart();
+    </script>
+    {% endif %}
+</div>
+{% endblock %}
