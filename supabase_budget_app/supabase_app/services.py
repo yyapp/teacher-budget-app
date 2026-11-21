@@ -71,6 +71,7 @@ def _unpack_transaction(row: Dict[str, Any]) -> Dict[str, Any]:
         transaction["additional_document_filename"] = metadata.get(
             "additional_document_filename"
         )
+        transaction["cart_summary"] = metadata.get("cart_summary")
     return transaction
 
 
@@ -222,6 +223,7 @@ def create_transaction(
     additional_document_path: Optional[str] = None,
     additional_document_filename: Optional[str] = None,
     line_items: Optional[List[Dict[str, Any]]] = None,
+    cart_summary: Optional[Dict[str, Any]] = None,
     status: str = STATUS_DRAFT,
     notes: str = "",
 ) -> Optional[Dict]:
@@ -233,9 +235,15 @@ def create_transaction(
         "line_items": line_items or [],
         "additional_document_path": additional_document_path,
         "additional_document_filename": additional_document_filename,
+        "cart_summary": cart_summary,
     }
     stored_notes = notes.strip()
-    if line_items or additional_document_path or additional_document_filename:
+    if (
+        line_items
+        or additional_document_path
+        or additional_document_filename
+        or cart_summary
+    ):
         stored_notes = TRANSACTION_META_PREFIX + json.dumps(
             metadata, ensure_ascii=False, separators=(",", ":")
         )

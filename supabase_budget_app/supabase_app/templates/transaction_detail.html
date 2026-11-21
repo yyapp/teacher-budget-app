@@ -37,6 +37,19 @@
     {% if transaction.line_items %}
     <div style="margin-top:20px;overflow-x:auto;">
         <h3 style="margin-bottom:10px;">품목 내역</h3>
+        {% if transaction.cart_check %}
+        <div class="card" style="padding:12px;margin:0 0 12px;">
+            <h4>장바구니 원문 주문 요약</h4>
+            <p>상품 합계: {% if transaction.cart_check.products_subtotal is not none %}{{ "{:,.0f}".format(transaction.cart_check.products_subtotal) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
+            <p>배송비: {% if transaction.cart_check.shipping is not none %}{{ "{:,.0f}".format(transaction.cart_check.shipping) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
+            <p>할인: {% if transaction.cart_check.discount is not none %}{{ "{:,.0f}".format(transaction.cart_check.discount) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
+            {% if transaction.cart_check.discount_inferred_zero %}<p class="text-muted">원문 요약에 할인 행이 없어 0원으로 가정해 비교했습니다.</p>{% endif %}
+            <p>결제 예정액: {% if transaction.cart_check.payable is not none %}{{ "{:,.0f}".format(transaction.cart_check.payable) }}원{% else %}원문에서 읽지 못함{% endif %}</p>
+            <p>품목 연결 검증: {% if transaction.cart_check.saved_products_status == 'matched' %}원문 상품 합계와 일치{% elif transaction.cart_check.saved_products_status == 'mismatch' %}원문 상품 합계와 불일치{% else %}원문 대조 불가{% endif %}</p>
+            <p>상품·배송·할인과 결제 예정액 검증: {% if transaction.cart_check.payable_status == 'matched' %}원문 대조 일치{% elif transaction.cart_check.payable_status == 'mismatch' %}원문 대조 불일치{% else %}원문 대조 불가{% endif %}</p>
+            {% if transaction.cart_check.payable is none %}<p class="text-muted">장부 금액 {{ "{:,.0f}".format(transaction.cart_check.ledger_amount) }}원은 원문 결제액이 아니라 저장 시점의 추정값입니다.</p>{% endif %}
+        </div>
+        {% endif %}
         {% if transaction.receipt_check %}
         <div role="status" style="padding:12px 14px;border-radius:6px;margin:0 0 12px;{% if not transaction.receipt_check.verified %}background:#fff7e0;color:#765600;border:1px solid #f0d98b;{% elif transaction.receipt_check.difference == 0 %}background:#e6f4ea;color:#1e6b3a;border:1px solid #b7e2c0;{% else %}background:#fce8e6;color:#8f2a1e;border:1px solid #f5c6b7;{% endif %}">
             {% if not transaction.receipt_check.verified %}
@@ -49,15 +62,17 @@
         </div>
         {% endif %}
         <table>
-            <thead><tr><th>품목</th><th class="text-right">수량</th><th class="text-right">단가</th><th class="text-right">금액</th></tr></thead>
+            <thead><tr><th>상품</th><th>옵션</th><th class="text-right">주문 수량</th><th class="text-right">단가</th><th class="text-right">품목 금액</th></tr></thead>
             <tbody>
                 {% for item in transaction.line_items %}
                 <tr>
                     <td>{{ item.description }}</td>
-                    <td class="text-right">{{ item.quantity }}</td>
+                    <td>{{ item.option or '-' }}{% if item.package_size %} / {{ item.package_size }}{% endif %}</td>
+                    <td class="text-right">{{ item.order_quantity or item.quantity }}</td>
                     <td class="text-right">{{ "{:,.0f}".format(item.unit_price) }}원</td>
                     <td class="text-right">{{ "{:,.0f}".format(item.amount) }}원</td>
                 </tr>
+                {% if item.source_text %}<tr><td colspan="5"><details><summary>원문 추출 근거</summary><small>{{ item.source_text }}</small></details></td></tr>{% endif %}
                 {% endfor %}
             </tbody>
         </table>

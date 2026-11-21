@@ -77,7 +77,13 @@
         });
     </script>
     {% else %}
-    <p class="text-muted" style="margin-bottom:14px;">주문 수량은 품목명에 함께 적고, 장부 수량은 1로 저장합니다. 이미지에 표시된 품목 줄 금액을 그대로 사용합니다.</p>
+    {% set cart_summary = review.get('cart_summary', {}) %}
+    {% set products_subtotal = cart_summary.get('products_subtotal') %}
+    {% set shipping = cart_summary.get('shipping') %}
+    {% set discount = cart_summary.get('discount') %}
+    {% set payable = cart_summary.get('payable') %}
+    {% set calculated_payable = cart_summary.get('calculated_payable') %}
+    <p class="text-muted" style="margin-bottom:14px;">상품 수량·단가·품목 금액과 주문 요약을 따로 읽었습니다. 장부 수량은 1이고 원래 주문 수량은 상세 품목에 보존합니다.</p>
     <form method="post" enctype="multipart/form-data" id="cart-review-form">
         <div class="form-group" style="max-width:460px;">
             <label for="budget_id_review">예산</label>
@@ -87,30 +93,57 @@
         </div>
         <div style="overflow-x:auto;margin:16px 0;">
             <table>
-                <thead><tr><th>품목 (주문 수량 포함)</th><th>장부 수량</th><th>품목 금액</th><th></th></tr></thead>
+                <thead><tr><th>상품</th><th>옵션 / 규격</th><th>주문 수량</th><th>단가</th><th>품목 금액</th><th>장부 수량</th><th></th></tr></thead>
                 <tbody id="cart-items">
                 {% for item in review["items"] %}
                     <tr>
                         <td><input name="item_description" aria-label="{{ loop.index }}번 품목" value="{{ item.description }}" required style="min-width:180px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
-                        <td><input name="item_quantity" aria-label="{{ loop.index }}번 장부 수량" type="number" value="1" readonly style="width:60px;padding:7px;border:1px solid #ddd;border-radius:5px;background:#f5f5f5;"></td>
+                        <td>
+                            <input name="item_option" aria-label="{{ loop.index }}번 옵션" value="{{ item.option }}" style="min-width:100px;width:100%;padding:7px;border:1px solid #ddd;border-radius:5px;">
+                            <input type="hidden" name="item_package_size" value="{{ item.package_size }}">
+                            <input type="hidden" name="item_source_text" value="{{ item.source_text }}">
+                            {% if item.package_size %}<small style="display:block;color:#667085;">규격 {{ item.package_size }}</small>{% endif %}
+                        </td>
+                        <td><input name="item_order_quantity" aria-label="{{ loop.index }}번 주문 수량" type="number" min="1" step="1" value="{{ item.order_quantity }}" required style="width:85px;padding:7px;border:1px solid #ddd;border-radius:5px;"></td>
+                        <td class="cart-unit-price">{% if item.unit_price is not none %}{{ "{:,.2f}".format(item.unit_price)|replace('.00','') }}원{% else %}검토 필요{% endif %}</td>
                         <td>
                             <input name="item_amount" aria-label="{{ loop.index }}번 품목 합계" type="number" min="1" step="1" value="{{ item.amount or '' }}" required style="width:130px;padding:7px;border:1px solid #ddd;border-radius:5px;">
+                            {% if item.needs_review %}<small style="display:block;color:#a15c00;">가격 연결 근거가 불명확합니다. 금액 칸에 품목 전체 금액을 입력해 주세요.</small>{% endif %}
+                            {% if item.package_size %}<small style="display:block;color:#667085;">포장 규격 {{ item.package_size }}</small>{% endif %}
                         </td>
+                        <td><span>1</span></td>
                         <td><button type="button" class="remove-cart-item btn btn-secondary" aria-label="{{ loop.index }}번 품목 삭제" style="padding:5px 8px;">삭제</button></td>
                     </tr>
                 {% endfor %}
                 </tbody>
             </table>
         </div>
-        <div class="row" style="align-items:end;">
-            <div class="form-group">
-                <label for="cart_total">{% if review.total_source == 'image' %}이미지에서 읽은 최종 구매금액{% else %}계산된 최종 구매금액{% endif %}</label>
-                <input id="cart_total" name="cart_total" type="number" min="1" step="1" value="{{ review.receipt_total or '' }}" {% if review.total_source == 'calculated' %}readonly{% endif %} required>
+        <section id="cart-summary"
+            data-source-products="{{ products_subtotal if products_subtotal is not none else '' }}"
+            data-source-shipping="{{ shipping if shipping is not none else '' }}"
+            data-source-discount="{{ discount if discount is not none else '' }}"
+            data-source-payable="{{ payable if payable is not none else '' }}"
+            data-discount-seen="{{ 'true' if cart_summary.get('discount_seen') else 'false' }}"
+            data-payable-source="{{ review.total_source }}"
+            style="padding:14px;border:1px solid #e4e7ec;border-radius:8px;margin:12px 0 18px;">
+            <h3 style="font-size:1rem;margin-bottom:8px;">주문 요약 (원문 항목 별도 대조)</h3>
+            <div class="row">
+                <p>원문 상품 합계: <strong>{% if products_subtotal is not none %}{{ "{:,.0f}".format(products_subtotal) }}원{% else %}읽지 못함{% endif %}</strong></p>
+                <p>품목 행 합계: <strong id="cart-items-total">{{ "{:,.0f}".format(review.items_total) }}원</strong></p>
+                <p>배송비: <strong>{% if shipping is not none %}{{ "{:,.0f}".format(shipping) }}원{% else %}원문 항목 없음/미확인{% endif %}</strong></p>
+                <p>할인: <strong>{% if discount is not none %}-{{ "{:,.0f}".format(discount) }}원{% else %}원문 항목 없음/미확인{% endif %}</strong></p>
+                <p>원문 결제 예정액: <strong>{% if payable is not none %}{{ "{:,.0f}".format(payable) }}원{% else %}읽지 못함{% endif %}</strong></p>
+                <p>품목+배송비-할인 계산: <strong>{% if calculated_payable is not none %}{{ "{:,.0f}".format(calculated_payable) }}원{% else %}비교 불가{% endif %}</strong></p>
             </div>
-            <p style="font-weight:600;margin:0 0 14px;">품목 합계: <span id="cart-items-total">{{ "{:,.0f}".format(review.items_total) }}</span>원</p>
-        </div>
-        <div id="cart-check" role="status" aria-live="polite" class="alert alert-error">검증 대기</div>
-        {% if review.total_source == 'calculated' %}<p class="text-muted" style="margin:-8px 0 14px;">이미지에서 최종 결제액을 찾지 못해 품목 줄의 금액을 자동 합산했습니다. 구매 완료 시 영수증에서 실제 결제액을 확인할 수 있습니다.</p>{% endif %}
+            {% if cart_summary.get('discount_inferred_zero') %}<p class="text-muted">원문 요약에 할인 행이 없어 할인 0원으로 계산했습니다. 할인 행이 화면 밖에 있으면 주문 합계 검증에 반영되지 않을 수 있습니다.</p>{% endif %}
+            <div id="product-check" role="status" class="alert {% if products_subtotal is not none and cart_summary.get('products_status') == 'matched' %}alert-success{% else %}alert-error{% endif %}" style="margin-top:10px;">{% if products_subtotal is none %}원문 상품 합계를 읽지 못해 원문 대조 불가입니다.{% elif cart_summary.get('products_status') == 'matched' %}원문 상품 합계와 품목 행 합계가 일치합니다.{% elif cart_summary.get('products_status') == 'mismatch' %}원문 상품 합계와 품목 행 합계가 다릅니다.{% else %}일부 품목 금액을 확인하지 못해 검토가 필요합니다.{% endif %}</div>
+            <div id="payable-check" role="status" class="alert {% if cart_summary.get('payable_status') == 'matched' %}alert-success{% else %}alert-error{% endif %}">{% if cart_summary.get('payable_status') == 'matched' %}상품·배송비·할인 계산과 원문 결제 예정액이 일치합니다.{% elif payable is none %}원문 결제 예정액을 읽지 못해 원문 대조 불가입니다.{% elif calculated_payable is none %}결제 예정액을 읽었지만 구성 금액이 부족해 대조할 수 없습니다.{% else %}상품·배송비·할인 계산과 원문 결제 예정액이 다릅니다.{% endif %}</div>
+            <div class="form-group" style="max-width:360px;margin-bottom:0;">
+                <label for="cart_total">장부에 기록할 구매 예정 금액</label>
+                <input id="cart_total" name="cart_total" type="number" min="1" step="1" value="{{ review.get('receipt_total') if review.get('receipt_total') is not none else '' }}" readonly required>
+                <small class="text-muted">원문 결제 예정액이 있으면 그대로 사용합니다. 없으면 확인 가능한 품목 기준 추정액이며, 원문 대조 완료로 표시하지 않습니다.</small>
+            </div>
+        </section>
         <div class="form-group" style="max-width:560px;">
             <label for="cart-notes">메모</label>
             <textarea id="cart-notes" name="notes" rows="2">{{ review.notes }}</textarea>
@@ -136,37 +169,76 @@
     <script>
         const reviewForm = document.querySelector('#cart-review-form');
         const cartTotal = document.querySelector('#cart_total');
-        const checkBox = document.querySelector('#cart-check');
+        const summaryBox = document.querySelector('#cart-summary');
+        const productCheck = document.querySelector('#product-check');
+        const payableCheck = document.querySelector('#payable-check');
         const buttons = [...reviewForm.querySelectorAll('button[name="action"]')];
         const formatMoney = amount => Math.round(amount).toLocaleString('ko-KR');
+        const sourceProducts = summaryBox.dataset.sourceProducts === '' ? null : Number(summaryBox.dataset.sourceProducts);
+        const sourceShipping = summaryBox.dataset.sourceShipping === '' ? null : Number(summaryBox.dataset.sourceShipping);
+        const sourceDiscount = summaryBox.dataset.sourceDiscount === '' ? null : Number(summaryBox.dataset.sourceDiscount);
+        const sourcePayable = summaryBox.dataset.sourcePayable === '' ? null : Number(summaryBox.dataset.sourcePayable);
+        const discountSeen = summaryBox.dataset.discountSeen === 'true';
         function verifyCart() {
             const rows = [...document.querySelectorAll('#cart-items tr')];
             let unresolved = false;
             let sum = 0;
             for (const row of rows) {
                 const amountInput = row.querySelector('[name="item_amount"]');
-                const quantity = Number(row.querySelector('[name="item_quantity"]').value) || 0;
+                const quantity = Number(row.querySelector('[name="item_order_quantity"]').value) || 0;
                 const amount = Number(amountInput.value) || 0;
                 if (!amountInput.value || !quantity) unresolved = true;
+                const unit = row.querySelector('.cart-unit-price');
+                unit.textContent = amount && quantity ? `${formatMoney(amount / quantity)}원` : '검토 필요';
                 sum += amount;
             }
-            if (cartTotal.readOnly) cartTotal.value = String(sum || '');
-            const total = Number(cartTotal.value) || 0;
+            const formulaPayable = sourceProducts !== null && sourceShipping !== null && discountSeen
+                ? sourceProducts + sourceShipping - (sourceDiscount || 0)
+                : null;
+            const ledgerAmount = sourcePayable !== null
+                ? sourcePayable
+                : formulaPayable !== null
+                    ? formulaPayable
+                    : sourceProducts !== null
+                        ? sourceProducts
+                        : sum;
+            cartTotal.value = ledgerAmount > 0 ? String(ledgerAmount) : '';
             document.querySelector('#cart-items-total').textContent = formatMoney(sum);
-            if (unresolved || !total) {
-                checkBox.className = 'alert alert-error';
-                checkBox.textContent = unresolved ? '검증 대기: 품목 금액을 확인해 주세요.' : '검증 대기: 최종 구매금액을 확인해 주세요.';
-            } else if (sum === total) {
-                checkBox.className = 'alert alert-success';
-                checkBox.textContent = `검증 완료: 구매금액 ${formatMoney(total)}원과 품목 합계가 일치합니다.`;
+            if (sourceProducts === null) {
+                productCheck.className = 'alert alert-error';
+                productCheck.textContent = `원문 상품 합계를 읽지 못해 원문 대조 불가입니다. 현재 품목 행 합계는 ${formatMoney(sum)}원입니다.`;
+            } else if (unresolved) {
+                productCheck.className = 'alert alert-error';
+                productCheck.textContent = '품목 검토 필요: 금액이 비어 있는 상품 행이 있습니다.';
+            } else if (sum === sourceProducts) {
+                productCheck.className = 'alert alert-success';
+                productCheck.textContent = `원문 대조 일치: 상품 합계 ${formatMoney(sourceProducts)}원 = 품목 행 합계 ${formatMoney(sum)}원`;
             } else {
-                checkBox.className = 'alert alert-error';
-                checkBox.textContent = `금액 불일치: 구매금액 ${formatMoney(total)}원, 품목 합계 ${formatMoney(sum)}원, 차액 ${formatMoney(Math.abs(total - sum))}원입니다.`;
+                productCheck.className = 'alert alert-error';
+                productCheck.textContent = `원문 대조 불일치: 상품 합계 ${formatMoney(sourceProducts)}원 / 품목 행 합계 ${formatMoney(sum)}원 / 차액 ${formatMoney(Math.abs(sourceProducts - sum))}원`;
             }
-            buttons.forEach(button => button.disabled = unresolved || !total || !rows.length || sum !== total);
+            if (sourcePayable === null) {
+                payableCheck.className = 'alert alert-error';
+                payableCheck.textContent = formulaPayable === null
+                    ? '주문 합계 원문 대조 불가: 결제 예정액 또는 배송비·할인 구성값이 원문에서 확인되지 않았습니다.'
+                    : `원문 결제 예정액은 찾지 못했습니다. 구성 합계 ${formatMoney(formulaPayable)}원은 계산값이며 원문 대조 불가입니다.`;
+            } else if (formulaPayable === null) {
+                payableCheck.className = 'alert alert-error';
+                payableCheck.textContent = `원문 결제 예정액 ${formatMoney(sourcePayable)}원은 읽었지만 배송비·할인 구성이 모두 확인되지 않아 계산 대조 불가입니다.`;
+            } else if (sourcePayable === formulaPayable) {
+                payableCheck.className = 'alert alert-success';
+                payableCheck.textContent = `주문 요약 대조 일치: 상품 ${formatMoney(sourceProducts)} + 배송 ${formatMoney(sourceShipping)} - 할인 ${formatMoney(sourceDiscount || 0)} = 결제 예정 ${formatMoney(sourcePayable)}원`;
+            } else {
+                payableCheck.className = 'alert alert-error';
+                payableCheck.textContent = `주문 요약 대조 불일치: 원문 결제 예정액 ${formatMoney(sourcePayable)}원 / 구성 계산 ${formatMoney(formulaPayable)}원 / 차액 ${formatMoney(Math.abs(sourcePayable - formulaPayable))}원`;
+            }
+            const sourceMismatch = sourceProducts !== null && !unresolved && sum !== sourceProducts;
+            const payableMismatch = sourcePayable !== null && formulaPayable !== null && sourcePayable !== formulaPayable;
+            buttons.forEach(button => button.disabled = unresolved || !rows.length || sourceMismatch || payableMismatch || !(ledgerAmount > 0));
         }
         reviewForm.addEventListener('input', verifyCart);
         reviewForm.addEventListener('change', verifyCart);
+        document.querySelectorAll('[name="item_order_quantity"], [name="item_amount"]').forEach(input => input.addEventListener('input', verifyCart));
         document.querySelectorAll('.remove-cart-item').forEach(button => button.addEventListener('click', () => {
             button.closest('tr').remove();
             verifyCart();
@@ -175,8 +247,8 @@
             const submitter = event.submitter;
             if (submitter?.value === 'purchase' && !document.querySelector('#purchase_receipt').files.length) {
                 event.preventDefault();
-                checkBox.className = 'alert alert-error';
-                checkBox.textContent = '구매 완료에는 영수증을 첨부해 주세요.';
+                productCheck.className = 'alert alert-error';
+                productCheck.textContent = '구매 완료에는 영수증을 첨부해 주세요.';
                 document.querySelector('#purchase_receipt').focus();
             }
         });

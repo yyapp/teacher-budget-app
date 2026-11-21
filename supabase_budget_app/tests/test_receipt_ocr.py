@@ -5,6 +5,7 @@ from unittest.mock import patch
 from supabase_app.receipt_ocr import (
     _ocr_text,
     cart_items_from_ocr,
+    extract_cart_fields,
     extract_receipt_fields,
     parse_receipt,
 )
@@ -69,6 +70,89 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         )
 
         self.assertEqual(text.splitlines(), ["공책 3,000원", "연필 1,000원"])
+
+    def test_positioned_words_are_used_even_when_flat_text_exists(self):
+        text = _ocr_text(
+            {
+                "text": "상품1 1,600원 18개 28,800원 상품2 1,200원 18개 21,600원",
+                "pages": [
+                    {
+                        "height": 1000,
+                        "text": "상품1 1,600원 18개 28,800원 상품2 1,200원 18개 21,600원",
+                        "words": [
+                            {
+                                "text": "상품1",
+                                "boundingBox": {
+                                    "vertices": [
+                                        {"x": 10, "y": 100},
+                                        {"x": 35, "y": 100},
+                                        {"x": 35, "y": 120},
+                                        {"x": 10, "y": 120},
+                                    ]
+                                },
+                            },
+                            {
+                                "text": "상품2",
+                                "boundingBox": {
+                                    "vertices": [
+                                        {"x": 10, "y": 150},
+                                        {"x": 35, "y": 150},
+                                        {"x": 35, "y": 170},
+                                        {"x": 10, "y": 170},
+                                    ]
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(text, "상품1\n상품2")
+
+    def test_cart_handover_two_items_and_independent_order_totals(self):
+        fields = extract_cart_fields(
+            "장바구니 목록\n바로구매\n옵션저장\n"
+            "곰돌이푸 짝꿍 미니 수첩\n1,600원 18개 28,800원\n"
+            "크리스마스 산타모자 산타분장\n1,200원 18개 21,600원\n"
+            "총 상품 금액 50,400원\n배송비 3,000원\n주문 금액 53,400원"
+        )
+
+        self.assertEqual(
+            [item["description"] for item in fields["items"]],
+            ["곰돌이푸 짝꿍 미니 수첩", "크리스마스 산타모자 산타분장"],
+        )
+        self.assertEqual([item["order_quantity"] for item in fields["items"]], [18, 18])
+        self.assertEqual([item["unit_price"] for item in fields["items"]], [1600, 1200])
+        self.assertEqual(
+            [item["item_amount"] for item in fields["items"]], [28800, 21600]
+        )
+        self.assertEqual(fields["products_subtotal"], 50400)
+        self.assertEqual(fields["calculated_items_subtotal"], 50400)
+        self.assertEqual(fields["shipping"], 3000)
+        self.assertEqual(fields["discount"], 0)
+        self.assertEqual(fields["payable"], 53400)
+        self.assertEqual(fields["calculated_payable"], 53400)
+        self.assertEqual(fields["products_status"], "matched")
+        self.assertEqual(fields["payable_status"], "matched")
+
+    def test_cart_preserves_package_size_separately_from_order_quantity(self):
+        fields = extract_cart_fields("[간식] 초코 과자 20개입\n2,720원 18개 48,960원")
+
+        self.assertEqual(fields["items"][0]["package_size"], "20개입")
+        self.assertEqual(fields["items"][0]["order_quantity"], 18)
+        self.assertEqual(fields["items"][0]["item_amount"], 48960)
+
+    def test_cart_missing_original_summaries_are_not_reported_as_verified(self):
+        fields = extract_cart_fields(
+            "수첩\n1,600원 18개 28,800원\n모자\n1,200원 18개 21,600원"
+        )
+
+        self.assertEqual(fields["calculated_items_subtotal"], 50400)
+        self.assertIsNone(fields["products_subtotal"])
+        self.assertEqual(fields["products_status"], "unavailable")
+        self.assertIsNone(fields["payable"])
+        self.assertEqual(fields["payable_status"], "unavailable")
 
     def test_extracts_item_totals_and_quantities(self):
         fields = extract_receipt_fields(
@@ -200,15 +284,13 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         self.assertEqual(fields["amount"], 9000)
         self.assertEqual(fields["total_difference"], -1000)
 
-    def test_automatically_chooses_receipt_price_candidate_matching_total(self):
+    def test_generic_receipt_does_not_force_price_candidates_to_match_total(self):
         fields = extract_receipt_fields(
             "과자A\n18,800원 10,800원 2개\n과자B\n22,000원 1개\n실결제금액 32,800원"
         )
 
-        self.assertEqual([item["amount"] for item in fields["items"]], [10800, 22000])
-        self.assertEqual(
-            [item["unit_price"] for item in fields["items"]], [5400, 22000]
-        )
+        self.assertIsNone(fields["items"][0]["amount"])
+        self.assertTrue(fields["items"][0]["needs_review"])
 
     def test_excludes_approval_number_from_card_total(self):
         fields = extract_receipt_fields(
@@ -233,39 +315,30 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         self.assertEqual(fields["items"][0]["unit_price"], 4780)
         self.assertEqual(fields["items"][0]["amount"], 9560)
         self.assertEqual(fields["items"][1]["quantity"], 2)
-        self.assertEqual(fields["items"][1]["unit_price"], 9400)
-        self.assertEqual(fields["items"][1]["amount"], 18800)
+        self.assertIsNone(fields["items"][1]["unit_price"])
+        self.assertIsNone(fields["items"][1]["amount"])
         self.assertEqual(fields["items"][1]["price_candidates"], [18800, 10800])
         self.assertEqual(fields["amount"], 31120)
 
     def test_cart_line_total_is_not_multiplied_by_quantity_again(self):
-        cart_items = cart_items_from_ocr(
-            [
-                {
-                    "description": "초코 과자",
-                    "quantity": 20,
-                    "unit_price": 54400,
-                    "amount": 1088000,
-                    "price_candidates": [54400],
-                    "needs_review": False,
-                }
-            ]
-        )
+        parsed = extract_cart_fields("초코 과자 20개입\n2,720원 20개 54,400원")
+        cart_items = cart_items_from_ocr(parsed["items"])
 
         self.assertEqual(cart_items[0]["amount"], 54400)
-        self.assertEqual(cart_items[0]["unit_price"], 54400)
+        self.assertEqual(cart_items[0]["unit_price"], 2720)
         self.assertEqual(cart_items[0]["quantity"], 1)
-        self.assertIn("주문 20개", cart_items[0]["description"])
+        self.assertEqual(cart_items[0]["order_quantity"], 20)
         self.assertNotEqual(cart_items[0]["amount"], 1088000)
 
     def test_order_row_bold_price_is_full_item_amount(self):
         fields = extract_receipt_fields("[오리온] 초코 과자 144g\n54,400원 20개")
 
-        self.assertEqual(fields["items"][0]["quantity"], 20)
-        self.assertEqual(fields["items"][0]["amount"], 54400)
+        fields = extract_cart_fields("[오리온] 초코 과자 144g\n2,720원 20개 54,400원")
+        self.assertEqual(fields["items"][0]["order_quantity"], 20)
+        self.assertEqual(fields["items"][0]["item_amount"], 54400)
         self.assertEqual(fields["items"][0]["unit_price"], 2720)
 
-    def test_cart_multiple_price_candidates_default_without_manual_choice(self):
+    def test_cart_multiple_unrelated_prices_remain_review_required(self):
         cart_items = cart_items_from_ocr(
             [
                 {
@@ -279,11 +352,11 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         )
 
         self.assertEqual(cart_items[0]["amount_candidates"], [30000, 22000])
-        self.assertEqual(cart_items[0]["amount"], 30000)
-        self.assertEqual(cart_items[0]["unit_price"], 30000)
+        self.assertEqual(cart_items[0]["amount"], "")
+        self.assertIsNone(cart_items[0]["unit_price"])
         self.assertEqual(cart_items[0]["quantity"], 1)
 
-    def test_cart_price_candidates_are_auto_selected_to_match_total(self):
+    def test_cart_items_do_not_change_prices_to_match_an_order_total(self):
         cart_items = cart_items_from_ocr(
             [
                 {
@@ -300,9 +373,8 @@ class ReceiptOcrParsingTests(unittest.TestCase):
             final_total=32800,
         )
 
-        self.assertEqual([item["amount"] for item in cart_items], [10800, 22000])
-        self.assertEqual(sum(item["amount"] for item in cart_items), 32800)
-        self.assertEqual([item["unit_price"] for item in cart_items], [10800, 22000])
+        self.assertEqual([item["amount"] for item in cart_items], ["", ""])
+        self.assertEqual([item["unit_price"] for item in cart_items], [None, None])
         self.assertEqual([item["quantity"] for item in cart_items], [1, 1])
 
     def test_does_not_guess_receipt_total_from_item_sum(self):

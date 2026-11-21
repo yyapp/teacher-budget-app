@@ -23,7 +23,12 @@ from . import services
 from .storage import delete_receipt as storage_delete
 from .storage import signed_receipt_url
 from .storage import upload_receipt as storage_upload
-from .receipt_ocr import ReceiptOcrError, cart_items_from_ocr, parse_receipt
+from .receipt_ocr import (
+    ReceiptOcrError,
+    cart_items_from_ocr,
+    parse_cart_image,
+    parse_receipt,
+)
 from .forms import (
     is_valid_amount,
     is_valid_quantity,
@@ -49,6 +54,17 @@ def _evidence_filename(
 def _normalize_budget_name(name: str) -> str:
     normalized = re.sub(r"[\s·_-]+", "", name).casefold()
     return re.sub(r"^(20\d{2})(?:년)?(?:학년도)?", r"\1", normalized)
+
+
+def _short_cart_description(items: list[dict[str, Any]]) -> str:
+    names = " ".join(item.get("description", "") for item in items)
+    if re.search(r"과자|캔디|초콜릿|초코|사탕|스낵|쿠키|젤리", names):
+        return "과자·간식류 구매"
+    if re.search(r"수첩|공책|노트|펜|연필|문구|교재|교과서", names):
+        return "문구류 구매"
+    if re.search(r"모자|분장|장식|풍선", names):
+        return "행사 용품 구매"
+    return f"장바구니 구매 ({len(items)}개 품목)"
 
 
 def _clear_pending_ocr_reviews() -> None:
@@ -496,13 +512,25 @@ def transaction_detail(tx_id: str) -> str:
     line_items = tx.get("line_items") or []
     if isinstance(line_items, list) and line_items:
         items_total = sum(float(item.get("amount") or 0) for item in line_items)
-        receipt_total = float(tx.get("amount") or 0)
-        tx["receipt_check"] = {
-            "items_total": items_total,
-            "receipt_total": receipt_total,
-            "difference": receipt_total - items_total,
-            "verified": not bool(line_items[0].get("_receipt_total_unread")),
-        }
+        cart_summary = tx.get("cart_summary")
+        if cart_summary:
+            source_subtotal = cart_summary.get("products_subtotal")
+            cart_summary["saved_items_subtotal"] = items_total
+            cart_summary["saved_products_status"] = (
+                "unavailable"
+                if source_subtotal is None
+                else "matched"
+                if source_subtotal == items_total
+                else "mismatch"
+            )
+            tx["cart_check"] = cart_summary
+        else:
+            tx["receipt_check"] = {
+                "items_total": items_total,
+                "receipt_total": float(tx.get("amount") or 0),
+                "difference": float(tx.get("amount") or 0) - items_total,
+                "verified": False,
+            }
     return render_template("transaction_detail.html", transaction=tx)
 
 
@@ -629,15 +657,11 @@ def cart_review() -> Any:
                 else "application/pdf"
             )
             try:
-                fields = parse_receipt(image.read(), image.filename, content_type)
+                fields = parse_cart_image(image.read(), image.filename, content_type)
             except ReceiptOcrError as exc:
                 flash(str(exc), "error")
                 return redirect(url_for("app.cart_review"))
-            detected_total = safe_float(fields.get("amount"))
-            items = cart_items_from_ocr(
-                fields.get("items") or [],
-                detected_total if detected_total > 0 else None,
-            )
+            items = cart_items_from_ocr(fields.get("items") or [])
             if not items:
                 session.pop("cart_image_review", None)
                 flash(
@@ -650,14 +674,50 @@ def cart_review() -> Any:
                 for item in items
                 if isinstance(item.get("amount"), (int, float))
             )
+            summary = {
+                key: fields.get(key)
+                for key in (
+                    "products_subtotal",
+                    "shipping",
+                    "discount",
+                    "payable",
+                    "calculated_items_subtotal",
+                    "calculated_payable",
+                    "products_status",
+                    "payable_status",
+                    "discount_seen",
+                    "discount_inferred_zero",
+                    "summary_seen",
+                )
+            }
+            payable = fields.get("payable")
+            if payable is not None:
+                suggested_total = payable
+                total_source = "image"
+            elif fields.get("calculated_payable") is not None:
+                suggested_total = fields["calculated_payable"]
+                total_source = "calculated"
+            elif fields.get("products_subtotal") is not None:
+                suggested_total = fields["products_subtotal"]
+                total_source = "products_subtotal_only"
+            else:
+                suggested_total = (
+                    line_total
+                    if all(
+                        isinstance(item.get("amount"), (int, float)) for item in items
+                    )
+                    else None
+                )
+                total_source = "items_estimate"
             review = {
                 "budget_id": budget_id,
                 "items": items,
-                "receipt_total": detected_total if detected_total > 0 else line_total,
-                "total_source": "image" if detected_total > 0 else "calculated",
+                "receipt_total": suggested_total,
+                "total_source": total_source,
                 "items_total": line_total,
+                "cart_summary": summary,
                 "notes": non_empty_str(request.form.get("notes")),
-                "parser_version": 3,
+                "parser_version": 4,
             }
             session["cart_image_review"] = review
             return render_template("cart_review.html", budgets=budgets, review=review)
@@ -667,31 +727,56 @@ def cart_review() -> Any:
             return redirect(url_for("app.cart_review"))
 
         descriptions = request.form.getlist("item_description")
-        quantities = request.form.getlist("item_quantity")
+        options = request.form.getlist("item_option")
+        package_sizes = request.form.getlist("item_package_size")
+        source_texts = request.form.getlist("item_source_text")
+        order_quantities = request.form.getlist("item_order_quantity")
         item_amounts = request.form.getlist("item_amount")
         line_items = []
-        for description, quantity, amount in zip(
-            descriptions, quantities, item_amounts
+        for index, (
+            description,
+            option,
+            package_size,
+            source_text,
+            order_quantity,
+            amount,
+        ) in enumerate(
+            zip(
+                descriptions,
+                options,
+                package_sizes,
+                source_texts,
+                order_quantities,
+                item_amounts,
+            )
         ):
             description = non_empty_str(description)
-            quantity_value = safe_int(quantity)
+            order_quantity_value = safe_int(order_quantity)
             amount_value = safe_float(amount)
-            if description and quantity_value > 0 and amount_value > 0:
+            if description and order_quantity_value > 0 and amount_value > 0:
                 line_items.append(
                     {
                         "description": description,
-                        "quantity": quantity_value,
-                        "unit_price": amount_value / quantity_value,
+                        "option": non_empty_str(option),
+                        "package_size": non_empty_str(package_size),
+                        "quantity": 1,
+                        "order_quantity": order_quantity_value,
+                        "unit_price": amount_value / order_quantity_value,
                         "amount": amount_value,
+                        "source_text": source_text,
                     }
                 )
         if (
             not line_items
             or len(line_items) != len(descriptions)
-            or len(descriptions) != len(quantities)
-            or len(quantities) != len(item_amounts)
+            or len(descriptions) != len(options)
+            or len(options) != len(package_sizes)
+            or len(package_sizes) != len(source_texts)
+            or len(source_texts) != len(order_quantities)
+            or len(descriptions) != len(order_quantities)
+            or len(order_quantities) != len(item_amounts)
         ):
-            flash("품목의 이름·수량·단가를 확인해 주세요.", "error")
+            flash("품목의 이름·주문 수량·품목 금액을 확인해 주세요.", "error")
             return render_template("cart_review.html", budgets=budgets, review=review)
 
         receipt_file = request.files.get("purchase_receipt")
@@ -700,50 +785,37 @@ def cart_review() -> Any:
             flash("구매 완료 처리에는 영수증을 첨부해 주세요.", "error")
             return render_template("cart_review.html", budgets=budgets, review=review)
 
-        cart_total = safe_float(
-            request.form.get("cart_total"), safe_float(review.get("receipt_total"))
-        )
-        if cart_total <= 0:
-            flash("장바구니의 최종 구매금액을 확인해 주세요.", "error")
-            return render_template("cart_review.html", budgets=budgets, review=review)
         item_total = sum(item["amount"] for item in line_items)
-        if item_total != cart_total:
+        summary = review.get("cart_summary", {})
+        cart_total = safe_float(review.get("receipt_total"))
+        if cart_total <= 0:
+            cart_total = safe_float(summary.get("calculated_payable"))
+        if cart_total <= 0:
+            cart_total = safe_float(summary.get("products_subtotal"))
+        if cart_total <= 0:
+            cart_total = item_total
+        if cart_total <= 0:
+            flash("품목 금액을 읽지 못했습니다. 품목을 확인해 주세요.", "error")
+            return render_template("cart_review.html", budgets=budgets, review=review)
+        source_subtotal = summary.get("products_subtotal")
+        if source_subtotal is not None and item_total != source_subtotal:
             flash(
-                f"금액이 일치하지 않습니다. 품목 합계 {item_total:,.0f}원과 구매금액 {cart_total:,.0f}원의 차이를 수정한 뒤 완료해 주세요.",
+                f"원문 상품 합계 {source_subtotal:,.0f}원과 품목 목록 합계 {item_total:,.0f}원이 다릅니다. 품목 내역을 확인해 주세요.",
                 "error",
             )
             return render_template("cart_review.html", budgets=budgets, review=review)
-
-        receipt_total = None
-        if action == "purchase":
-            if not allowed_file(receipt_file.filename):
-                flash("영수증은 PNG, JPG, JPEG, HEIC, PDF 파일이어야 합니다.", "error")
-                return render_template(
-                    "cart_review.html", budgets=budgets, review=review
-                )
-            receipt_file.seek(0, os.SEEK_END)
-            receipt_size = receipt_file.tell()
-            receipt_file.seek(0)
-            if receipt_size > MAX_FILE_SIZE:
-                flash("영수증은 10MB 이하여야 합니다.", "error")
-                return render_template(
-                    "cart_review.html", budgets=budgets, review=review
-                )
-            receipt_ext = receipt_file.filename.rsplit(".", 1)[1].lower()
-            receipt_content_type = (
-                f"image/{receipt_ext}"
-                if receipt_ext in ("png", "jpg", "jpeg", "heic", "heif")
-                else "application/pdf"
+        source_payable = summary.get("payable")
+        calculated_payable = summary.get("calculated_payable")
+        if (
+            source_payable is not None
+            and calculated_payable is not None
+            and source_payable != calculated_payable
+        ):
+            flash(
+                "원문 결제 예정 금액이 상품 합계·배송비·할인 계산과 맞지 않습니다. 주문 요약을 확인해 주세요.",
+                "error",
             )
-            try:
-                receipt_fields = parse_receipt(
-                    receipt_file.read(), receipt_file.filename, receipt_content_type
-                )
-                parsed_total = safe_float(receipt_fields.get("amount"))
-                receipt_total = parsed_total if parsed_total > 0 else None
-            except ReceiptOcrError:
-                receipt_total = None
-            receipt_file.seek(0)
+            return render_template("cart_review.html", budgets=budgets, review=review)
 
         budget_name = next(
             (
@@ -802,21 +874,17 @@ def cart_review() -> Any:
                 )
             evidence[field] = {"path": path, "filename": stored_name}
 
-        amount = receipt_total if receipt_total is not None else cart_total
+        amount = cart_total
         notes = non_empty_str(request.form.get("notes", review.get("notes", "")))
-        line_items[0]["_receipt_total_unread"] = receipt_total is None
-        line_items[0]["_receipt_total_source"] = (
-            "receipt" if receipt_total is not None else "cart_estimate"
-        )
         status = (
             services.STATUS_CONFIRMED if action == "purchase" else services.STATUS_DRAFT
         )
         try:
             transaction = services.create_transaction(
                 budget_id=review["budget_id"],
-                description=", ".join(item["description"] for item in line_items),
+                description=_short_cart_description(line_items),
                 amount=amount,
-                quantity=sum(item["quantity"] for item in line_items),
+                quantity=1,
                 unit_price=None,
                 receipt_path=evidence.get("receipt", {}).get("path"),
                 receipt_filename=evidence.get("receipt", {}).get("filename"),
@@ -825,6 +893,11 @@ def cart_review() -> Any:
                     "filename"
                 ),
                 line_items=line_items,
+                cart_summary={
+                    **summary,
+                    "ledger_amount": amount,
+                    "ledger_amount_source": review.get("total_source"),
+                },
                 status=status,
                 notes=notes,
             )

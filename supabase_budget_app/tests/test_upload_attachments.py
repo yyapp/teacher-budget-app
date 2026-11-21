@@ -33,8 +33,22 @@ class UploadAttachmentTests(unittest.TestCase):
 
         fake = FakeClient()
         line_items = [
-            {"description": "교재", "quantity": 1, "unit_price": 5000, "amount": 5000}
+            {
+                "description": "교재",
+                "quantity": 1,
+                "order_quantity": 2,
+                "unit_price": 2500,
+                "amount": 5000,
+            }
         ]
+        cart_summary = {
+            "products_subtotal": 5000,
+            "shipping": 3000,
+            "discount": 0,
+            "payable": 8000,
+            "products_status": "matched",
+            "payable_status": "matched",
+        }
         with patch("supabase_app.services.client", return_value=fake):
             transaction = services.create_transaction(
                 budget_id="budget-id",
@@ -43,6 +57,7 @@ class UploadAttachmentTests(unittest.TestCase):
                 additional_document_path="raw/statement.pdf",
                 additional_document_filename="statement.pdf",
                 line_items=line_items,
+                cart_summary=cart_summary,
                 notes="수업 준비물",
             )
 
@@ -51,6 +66,7 @@ class UploadAttachmentTests(unittest.TestCase):
         self.assertIn(services.TRANSACTION_META_PREFIX, fake.row["notes"])
         self.assertEqual(transaction["line_items"], line_items)
         self.assertEqual(transaction["additional_document_path"], "raw/statement.pdf")
+        self.assertEqual(transaction["cart_summary"], cart_summary)
         self.assertEqual(transaction["notes"], "수업 준비물")
 
     def test_cart_image_is_parsed_into_review_table(self):
@@ -61,19 +77,29 @@ class UploadAttachmentTests(unittest.TestCase):
                 return_value=[{"id": "budget-id", "name": "학급비"}],
             ),
             patch(
-                "supabase_app.routes.parse_receipt",
+                "supabase_app.routes.parse_cart_image",
                 return_value={
                     "items": [
                         {
                             "description": "교재",
+                            "order_quantity": 2,
                             "quantity": 2,
                             "unit_price": 5000,
+                            "item_amount": 10000,
                             "amount": 10000,
                             "price_candidates": [5000],
                             "needs_review": False,
                         }
                     ],
-                    "amount": 10000,
+                    "products_subtotal": 10000,
+                    "calculated_items_subtotal": 10000,
+                    "shipping": 0,
+                    "discount": 0,
+                    "payable": 10000,
+                    "calculated_payable": 10000,
+                    "products_status": "matched",
+                    "payable_status": "matched",
+                    "discount_seen": True,
                 },
             ) as parse,
         ):
@@ -90,8 +116,121 @@ class UploadAttachmentTests(unittest.TestCase):
         self.assertIn("교재".encode(), response.data)
         self.assertIn("구매 완료".encode(), response.data)
         self.assertIn("영수증 (구매 완료 시 필수)".encode(), response.data)
+        self.assertIn("원문 대조 일치".encode(), response.data)
         self.assertNotIn("합계 선택".encode(), response.data)
         parse.assert_called_once()
+
+    def test_handover_cart_image_keeps_two_rows_and_separate_order_summary(self):
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.list_budgets",
+                return_value=[{"id": "budget-id", "name": "행사비"}],
+            ),
+            patch(
+                "supabase_app.routes.parse_cart_image",
+                return_value={
+                    "items": [
+                        {
+                            "description": "곰돌이푸 짝꿍 미니 수첩",
+                            "order_quantity": 18,
+                            "quantity": 1,
+                            "unit_price": 1600,
+                            "item_amount": 28800,
+                            "amount": 28800,
+                            "needs_review": False,
+                        },
+                        {
+                            "description": "크리스마스 산타모자 산타분장",
+                            "order_quantity": 18,
+                            "quantity": 1,
+                            "unit_price": 1200,
+                            "item_amount": 21600,
+                            "amount": 21600,
+                            "needs_review": False,
+                        },
+                    ],
+                    "products_subtotal": 50400,
+                    "calculated_items_subtotal": 50400,
+                    "shipping": 3000,
+                    "discount": 0,
+                    "discount_seen": True,
+                    "payable": 53400,
+                    "calculated_payable": 53400,
+                    "products_status": "matched",
+                    "payable_status": "matched",
+                },
+            ),
+        ):
+            response = app.test_client().post(
+                "/cart-review",
+                data={
+                    "budget_id": "budget-id",
+                    "cart_image": (io.BytesIO(b"cart"), "cart.png"),
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("곰돌이푸 짝꿍 미니 수첩".encode(), response.data)
+        self.assertIn("크리스마스 산타모자 산타분장".encode(), response.data)
+        self.assertIn("50,400원".encode(), response.data)
+        self.assertIn("3,000원".encode(), response.data)
+        self.assertIn("53,400원".encode(), response.data)
+        self.assertIn("원문 대조 일치".encode(), response.data)
+        self.assertIn("상품 합계".encode(), response.data)
+        self.assertNotIn("장바구니 목록".encode(), response.data)
+
+    def test_missing_original_total_is_not_initially_shown_as_verified(self):
+        review = {
+            "budget_id": "budget-id",
+            "items": [
+                {
+                    "description": "수첩",
+                    "option": "",
+                    "package_size": "",
+                    "order_quantity": 2,
+                    "quantity": 1,
+                    "unit_price": 1000,
+                    "amount": 2000,
+                    "amount_candidates": [2000],
+                    "needs_review": False,
+                    "source_text": "1,000원 2개 2,000원",
+                }
+            ],
+            "items_total": 2000,
+            "receipt_total": 2000,
+            "total_source": "items_estimate",
+            "cart_summary": {
+                "products_subtotal": None,
+                "shipping": None,
+                "discount": None,
+                "payable": None,
+                "calculated_payable": None,
+                "products_status": "unavailable",
+                "payable_status": "unavailable",
+            },
+            "notes": "",
+        }
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.list_budgets",
+                return_value=[{"id": "budget-id", "name": "학급비"}],
+            ),
+        ):
+            client = app.test_client()
+            with client.session_transaction() as state:
+                state["cart_image_review"] = review
+            response = client.get("/cart-review")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "원문 상품 합계를 읽지 못해 원문 대조 불가입니다.".encode(), response.data
+        )
+        self.assertIn(
+            "원문 결제 예정액을 읽지 못해 원문 대조 불가입니다.".encode(), response.data
+        )
 
     def test_cart_requisition_completion_adds_draft_ledger_entry(self):
         review = {
@@ -99,13 +238,21 @@ class UploadAttachmentTests(unittest.TestCase):
             "items": [
                 {
                     "description": "교재",
-                    "quantity": 2,
+                    "quantity": 1,
+                    "order_quantity": 2,
                     "unit_price": 5000,
                     "amount": 10000,
                 }
             ],
             "items_total": 10000,
             "receipt_total": 10000,
+            "cart_summary": {
+                "products_subtotal": 10000,
+                "shipping": 0,
+                "discount": 0,
+                "payable": 10000,
+                "discount_seen": True,
+            },
             "notes": "",
         }
         with (
@@ -126,8 +273,11 @@ class UploadAttachmentTests(unittest.TestCase):
                 "/cart-review",
                 data={
                     "action": "requisition",
-                    "item_description": ["교재 (주문 2개)"],
-                    "item_quantity": ["1"],
+                    "item_description": ["교재"],
+                    "item_option": [""],
+                    "item_package_size": [""],
+                    "item_source_text": ["교재 2개 5,000원 10,000원"],
+                    "item_order_quantity": ["2"],
                     "item_amount": ["10000"],
                     "cart_total": "10000",
                 },
@@ -135,10 +285,102 @@ class UploadAttachmentTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(create.call_args.kwargs["amount"], 10000)
-        self.assertEqual(create.call_args.kwargs["line_items"][0]["unit_price"], 10000)
+        self.assertEqual(create.call_args.kwargs["line_items"][0]["unit_price"], 5000)
         self.assertEqual(create.call_args.kwargs["quantity"], 1)
-        self.assertIn("주문 2개", create.call_args.kwargs["description"])
+        self.assertEqual(create.call_args.kwargs["description"], "문구류 구매")
+        self.assertEqual(create.call_args.kwargs["line_items"][0]["order_quantity"], 2)
         self.assertEqual(create.call_args.kwargs["status"], services.STATUS_DRAFT)
+
+    def test_cart_save_keeps_line_amounts_and_shipping_in_order_total(self):
+        review = {
+            "budget_id": "budget-id",
+            "items": [
+                {
+                    "description": "곰돌이푸 짝꿍 미니 수첩",
+                    "option": "",
+                    "package_size": "",
+                    "order_quantity": 18,
+                    "quantity": 1,
+                    "unit_price": 1600,
+                    "amount": 28800,
+                    "source_text": "1,600원 18개 28,800원",
+                },
+                {
+                    "description": "크리스마스 산타모자 산타분장",
+                    "option": "",
+                    "package_size": "",
+                    "order_quantity": 18,
+                    "quantity": 1,
+                    "unit_price": 1200,
+                    "amount": 21600,
+                    "source_text": "1,200원 18개 21,600원",
+                },
+            ],
+            "items_total": 50400,
+            "receipt_total": 53400,
+            "total_source": "image",
+            "cart_summary": {
+                "products_subtotal": 50400,
+                "shipping": 3000,
+                "discount": 0,
+                "discount_seen": True,
+                "payable": 53400,
+                "calculated_payable": 53400,
+                "products_status": "matched",
+                "payable_status": "matched",
+            },
+            "notes": "",
+        }
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.list_budgets",
+                return_value=[{"id": "budget-id", "name": "행사비"}],
+            ),
+            patch(
+                "supabase_app.routes.services.create_transaction",
+                return_value={"id": "tx-id"},
+            ) as create,
+        ):
+            client = app.test_client()
+            with client.session_transaction() as state:
+                state["cart_image_review"] = review
+            response = client.post(
+                "/cart-review",
+                data={
+                    "action": "requisition",
+                    "item_description": [
+                        item["description"] for item in review["items"]
+                    ],
+                    "item_option": ["", ""],
+                    "item_package_size": ["", ""],
+                    "item_source_text": [
+                        item["source_text"] for item in review["items"]
+                    ],
+                    "item_order_quantity": ["18", "18"],
+                    "item_amount": ["28800", "21600"],
+                    "cart_total": "53400",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        saved = create.call_args.kwargs
+        self.assertEqual(saved["amount"], 53400)
+        self.assertEqual(
+            [item["amount"] for item in saved["line_items"]], [28800, 21600]
+        )
+        self.assertEqual([item["quantity"] for item in saved["line_items"]], [1, 1])
+        self.assertEqual(
+            [item["order_quantity"] for item in saved["line_items"]], [18, 18]
+        )
+        self.assertEqual(
+            [item["unit_price"] for item in saved["line_items"]], [1600, 1200]
+        )
+        self.assertEqual(saved["cart_summary"]["shipping"], 3000)
+        self.assertNotIn(
+            "곰돌이푸 짝꿍 미니 수첩, 크리스마스 산타모자 산타분장",
+            saved["description"],
+        )
 
     def test_cart_completion_rejects_amount_mismatch(self):
         review = {
@@ -153,6 +395,7 @@ class UploadAttachmentTests(unittest.TestCase):
             ],
             "items_total": 5000,
             "receipt_total": 5000,
+            "cart_summary": {"products_subtotal": 6000},
             "notes": "",
         }
         with (
@@ -171,14 +414,17 @@ class UploadAttachmentTests(unittest.TestCase):
                 data={
                     "action": "requisition",
                     "item_description": ["교재"],
-                    "item_quantity": ["1"],
+                    "item_option": [""],
+                    "item_package_size": [""],
+                    "item_source_text": ["교재"],
+                    "item_order_quantity": ["1"],
                     "item_amount": ["5000"],
                     "cart_total": "6000",
                 },
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("금액이 일치하지 않습니다".encode(), response.data)
+        self.assertIn("원문 상품 합계".encode(), response.data)
         create.assert_not_called()
 
     def test_cart_purchase_requires_receipt_and_confirms_entry(self):
@@ -211,10 +457,6 @@ class UploadAttachmentTests(unittest.TestCase):
                 side_effect=lambda name, reserved=None: name,
             ),
             patch(
-                "supabase_app.routes.parse_receipt",
-                return_value={"amount": 4800, "items": []},
-            ),
-            patch(
                 "supabase_app.routes.services.create_transaction",
                 return_value={"id": "tx-id"},
             ) as create,
@@ -227,7 +469,10 @@ class UploadAttachmentTests(unittest.TestCase):
                 data={
                     "action": "purchase",
                     "item_description": ["교재"],
-                    "item_quantity": ["1"],
+                    "item_option": [""],
+                    "item_package_size": [""],
+                    "item_source_text": ["교재"],
+                    "item_order_quantity": ["1"],
                     "item_amount": ["5000"],
                     "cart_total": "5000",
                 },
@@ -240,7 +485,10 @@ class UploadAttachmentTests(unittest.TestCase):
                 data={
                     "action": "purchase",
                     "item_description": ["교재"],
-                    "item_quantity": ["1"],
+                    "item_option": [""],
+                    "item_package_size": [""],
+                    "item_source_text": ["교재"],
+                    "item_order_quantity": ["1"],
                     "item_amount": ["5000"],
                     "cart_total": "5000",
                     "purchase_receipt": (io.BytesIO(b"receipt"), "receipt.pdf"),
@@ -251,10 +499,7 @@ class UploadAttachmentTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(create.call_args.kwargs["status"], services.STATUS_CONFIRMED)
-        self.assertEqual(create.call_args.kwargs["amount"], 4800)
-        self.assertTrue(
-            create.call_args.kwargs["line_items"][0]["_receipt_total_unread"] is False
-        )
+        self.assertEqual(create.call_args.kwargs["amount"], 5000)
         self.assertEqual(
             create.call_args.kwargs["receipt_path"], "raw/학급비_2026-11-21_영수증.pdf"
         )
@@ -742,7 +987,74 @@ class UploadAttachmentTests(unittest.TestCase):
         self.assertIn("학급비_2026-11-20_별빛문구.pdf".encode(), response.data)
         self.assertIn("교과서".encode(), response.data)
         self.assertIn("20,000원".encode(), response.data)
-        self.assertIn("검증 완료".encode(), response.data)
+        self.assertIn("비교 불가".encode(), response.data)
+
+    def test_transaction_detail_shows_cart_summary_separately_from_product_rows(self):
+        transaction = {
+            "id": "tx-cart",
+            "description": "문구류 구매",
+            "budget_id": "budget-id",
+            "amount": 53400,
+            "quantity": 1,
+            "unit_price": None,
+            "category": "",
+            "status": "draft",
+            "refund_amount": None,
+            "refund_reason": "",
+            "notes": "",
+            "created_at": "2026-11-21",
+            "updated_at": "2026-11-21",
+            "receipt_path": None,
+            "additional_document_path": None,
+            "cart_summary": {
+                "products_subtotal": 50400,
+                "shipping": 3000,
+                "discount": 0,
+                "payable": 53400,
+                "calculated_payable": 53400,
+                "products_status": "matched",
+                "payable_status": "matched",
+                "ledger_amount": 53400,
+                "ledger_amount_source": "image",
+            },
+            "line_items": [
+                {
+                    "description": "수첩",
+                    "option": "",
+                    "package_size": "",
+                    "order_quantity": 18,
+                    "quantity": 1,
+                    "unit_price": 1600,
+                    "amount": 28800,
+                    "source_text": "1,600원 18개 28,800원",
+                },
+                {
+                    "description": "산타모자",
+                    "option": "",
+                    "package_size": "",
+                    "order_quantity": 18,
+                    "quantity": 1,
+                    "unit_price": 1200,
+                    "amount": 21600,
+                    "source_text": "1,200원 18개 21,600원",
+                },
+            ],
+        }
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.get_transaction", return_value=transaction
+            ),
+        ):
+            response = app.test_client().get("/transactions/tx-cart")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("문구류 구매".encode(), response.data)
+        self.assertIn("50,400원".encode(), response.data)
+        self.assertIn("3,000원".encode(), response.data)
+        self.assertIn("53,400원".encode(), response.data)
+        self.assertIn("원문 추출 근거".encode(), response.data)
+        self.assertIn("주문 수량".encode(), response.data)
 
 
 if __name__ == "__main__":
