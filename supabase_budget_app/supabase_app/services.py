@@ -1,5 +1,6 @@
 """비즈니스 로직. DB 작업을 캡슐화한다."""
 
+import json
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -12,6 +13,7 @@ from .db import client
 BUDGETS_TABLE = "budgets"
 TRANSACTIONS_TABLE = "transactions"
 CART_PROPOSALS_TABLE = "cart_proposals"
+TRANSACTION_META_PREFIX = "__BUDGET_APP_META_V1__:"
 
 # 거래 상태
 STATUS_DRAFT = "draft"  # 임시
@@ -50,16 +52,26 @@ def init_tables() -> None:
             "Supabase SQL 에디터에서 아래 스크립트를 실행하세요.\n"
             "참고: supabase_app/doc/table-init.sql"
         )
-    try:
-        svc.table(TRANSACTIONS_TABLE).select(
-            "additional_document_path,additional_document_filename,line_items",
-            head=True,
-        ).execute()
-    except Exception as exc:
-        raise RuntimeError(
-            "첨부 서류·품목 목록용 DB 칸이 없습니다. Supabase SQL Editor에서 "
-            "supabase_app/doc/add-transaction-document-columns.sql을 실행하세요."
-        ) from exc
+
+
+def _unpack_transaction(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Read app metadata from the existing notes column on older Supabase schemas."""
+    transaction = dict(row)
+    notes = transaction.get("notes") or ""
+    if isinstance(notes, str) and notes.startswith(TRANSACTION_META_PREFIX):
+        try:
+            metadata = json.loads(notes[len(TRANSACTION_META_PREFIX) :])
+        except (TypeError, ValueError):
+            return transaction
+        transaction["notes"] = metadata.get("notes", "")
+        transaction["line_items"] = metadata.get("line_items", [])
+        transaction["additional_document_path"] = metadata.get(
+            "additional_document_path"
+        )
+        transaction["additional_document_filename"] = metadata.get(
+            "additional_document_filename"
+        )
+    return transaction
 
 
 # ===================== 예산 (Budgets) =====================
@@ -146,7 +158,7 @@ def list_transactions(
         query = query.eq("status", status)
     query = query.order("created_at", desc=True).limit(limit)
     result = query.execute()
-    return result.data if result.data else []
+    return [_unpack_transaction(row) for row in (result.data or [])]
 
 
 def get_transaction(tx_id: str) -> Optional[Dict]:
@@ -154,7 +166,7 @@ def get_transaction(tx_id: str) -> Optional[Dict]:
     result = (
         svc.table(TRANSACTIONS_TABLE).select("*").eq("id", tx_id).single().execute()
     )
-    return result.data if result.data else None
+    return _unpack_transaction(result.data) if result.data else None
 
 
 def unique_evidence_filename(
@@ -216,6 +228,17 @@ def create_transaction(
     """거래를 생성(임시 상태)."""
     svc = client()
     now = _now_iso()
+    metadata = {
+        "notes": notes.strip(),
+        "line_items": line_items or [],
+        "additional_document_path": additional_document_path,
+        "additional_document_filename": additional_document_filename,
+    }
+    stored_notes = notes.strip()
+    if line_items or additional_document_path or additional_document_filename:
+        stored_notes = TRANSACTION_META_PREFIX + json.dumps(
+            metadata, ensure_ascii=False, separators=(",", ":")
+        )
     row = {
         "id": str(uuid.uuid4()),
         "budget_id": budget_id,
@@ -226,18 +249,13 @@ def create_transaction(
         "unit_price": str(_to_decimal(unit_price)) if unit_price is not None else None,
         "receipt_path": receipt_path,
         "receipt_filename": receipt_filename,
-        "notes": notes.strip(),
+        "notes": stored_notes,
         "status": status,
         "created_at": now,
         "updated_at": now,
     }
-    if additional_document_path:
-        row["additional_document_path"] = additional_document_path
-        row["additional_document_filename"] = additional_document_filename
-    if line_items:
-        row["line_items"] = line_items
     result = svc.table(TRANSACTIONS_TABLE).insert(row).execute()
-    return result.data[0] if result.data else None
+    return _unpack_transaction(result.data[0]) if result.data else None
 
 
 def update_transaction(

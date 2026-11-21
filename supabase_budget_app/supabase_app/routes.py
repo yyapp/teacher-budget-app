@@ -316,7 +316,7 @@ def upload() -> Any:
                 )
             except Exception:
                 flash(
-                    "품목 목록을 저장할 DB 칸이 아직 준비되지 않았습니다. Supabase SQL Editor에서 DB 변경 스크립트를 실행해 주세요.",
+                    "장부 저장에 실패했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.",
                     "error",
                 )
                 return render_template("upload.html", budgets=budgets, review=pending)

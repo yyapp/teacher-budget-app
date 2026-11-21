@@ -14,7 +14,7 @@ Pil/wri 버전의 로컬 웹앱. Supabase(PostgreSQL, 인증, 스토리지) 기�
 2. 프로젝트 설정 → API → **프로젝트 URL**과 **서비스 역할 키(Service role secret)** 확인
 3. (옵션) Authentication → 이메일/비밀번호 활성화, 사용자 1명 생성
 4. Storage → `receipts` 버킷 생성 (공개/비공개는 보안 맞게 설정)
-5. 기존 프로젝트라면 `supabase_app/doc/add-transaction-document-columns.sql`을 SQL Editor에서 한 번 실행 (추가 첨부 파일과 품목별 내역 저장 칸)
+5. 추가 첨부 파일과 품목별 내역은 기존 DB의 메모 칸에 저장되므로 별도 SQL 변경은 필요하지 않습니다. `supabase_app/doc/add-transaction-document-columns.sql`은 선택적 스키마 확장용입니다.
 
 ## 로컬 실행
 

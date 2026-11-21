@@ -7,10 +7,52 @@ from unittest.mock import patch
 from app import app
 from supabase_app.routes import _evidence_filename, _normalize_budget_name
 from supabase_app import services
+from supabase_app.services import _unpack_transaction
 from supabase_app import storage
 
 
 class UploadAttachmentTests(unittest.TestCase):
+    def test_transaction_items_and_extra_evidence_use_existing_notes_column(self):
+        class InsertQuery:
+            def __init__(self, captured):
+                self.captured = captured
+
+            def insert(self, row):
+                self.captured.update(row)
+                return self
+
+            def execute(self):
+                return SimpleNamespace(data=[self.captured.copy()])
+
+        class FakeClient:
+            def __init__(self):
+                self.row = {}
+
+            def table(self, _name):
+                return InsertQuery(self.row)
+
+        fake = FakeClient()
+        line_items = [
+            {"description": "교재", "quantity": 1, "unit_price": 5000, "amount": 5000}
+        ]
+        with patch("supabase_app.services.client", return_value=fake):
+            transaction = services.create_transaction(
+                budget_id="budget-id",
+                description="교재",
+                amount=5000,
+                additional_document_path="raw/statement.pdf",
+                additional_document_filename="statement.pdf",
+                line_items=line_items,
+                notes="수업 준비물",
+            )
+
+        self.assertNotIn("line_items", fake.row)
+        self.assertNotIn("additional_document_path", fake.row)
+        self.assertIn(services.TRANSACTION_META_PREFIX, fake.row["notes"])
+        self.assertEqual(transaction["line_items"], line_items)
+        self.assertEqual(transaction["additional_document_path"], "raw/statement.pdf")
+        self.assertEqual(transaction["notes"], "수업 준비물")
+
     def test_cart_image_is_parsed_into_review_table(self):
         with (
             patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
