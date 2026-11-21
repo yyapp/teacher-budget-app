@@ -7,6 +7,7 @@ import httpx
 from supabase_app.receipt_ocr import (
     ReceiptOcrError,
     _ocr_text,
+    _normalize_cart_extraction,
     cart_items_from_ocr,
     extract_cart_fields,
     extract_receipt_fields,
@@ -112,7 +113,9 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         with patch.dict(os.environ, {"UPSTAGE_API_KEY": "test-key"}):
             result = parse_cart_image(b"cart image", "cart.png", "image/png")
 
-        self.assertTrue(result["items"][0]["needs_review"])
+        self.assertFalse(result["items"][0]["needs_review"])
+        self.assertEqual(result["items"][0]["amount"], 28800)
+        self.assertIn("신뢰도가 낮아", result["items"][0]["resolution_note"])
         self.assertEqual(result["products_status"], "review_required")
 
     @patch("supabase_app.receipt_ocr.parse_receipt")
@@ -282,6 +285,158 @@ class ReceiptOcrParsingTests(unittest.TestCase):
         self.assertEqual(fields["items"][0]["package_size"], "20개입")
         self.assertEqual(fields["items"][0]["order_quantity"], 18)
         self.assertEqual(fields["items"][0]["item_amount"], 48960)
+
+    def test_order_detail_prices_are_row_totals_and_sale_candidate_is_automatic(self):
+        raw = {
+            "items": [
+                {
+                    "description": "초콜릿 미니",
+                    "option": "",
+                    "package_size": "20개입",
+                    "order_quantity": "2개",
+                    "unit_price": "9,560원",
+                    "item_amount": "9,560원",
+                    "confidence": "high",
+                },
+                {
+                    "description": "소프트캔디",
+                    "option": "2층, 택1",
+                    "package_size": "1kg",
+                    "order_quantity": "1개",
+                    "unit_price": "8,080원, 8,980원",
+                    "item_amount": "8,980원",
+                    "confidence": "low",
+                },
+                {
+                    "description": "과자",
+                    "option": "",
+                    "package_size": "100g",
+                    "order_quantity": "20개",
+                    "unit_price": "30,000원, 22,000원",
+                    "item_amount": "22,000원",
+                    "confidence": "low",
+                },
+                {
+                    "description": "초코케이크",
+                    "option": "",
+                    "package_size": "144g",
+                    "order_quantity": "20개",
+                    "unit_price": "54,400원",
+                    "item_amount": "54,400원",
+                    "confidence": "low",
+                },
+            ],
+            "products_subtotal": "",
+            "shipping": "",
+            "discount": "",
+            "discount_present": False,
+            "order_amount": "",
+            "payable": "",
+        }
+
+        result = _normalize_cart_extraction(raw)
+        rows = result["items"]
+
+        self.assertEqual(
+            [row["item_amount"] for row in rows], [9560, 8080, 22000, 54400]
+        )
+        self.assertEqual([row["unit_price"] for row in rows], [4780, 8080, 1100, 2720])
+        self.assertEqual([row["order_quantity"] for row in rows], [2, 1, 20, 20])
+        self.assertTrue(all(row["quantity"] == 1 for row in rows))
+        self.assertTrue(all(not row["needs_review"] for row in rows))
+        self.assertIn("낮은 현재가를 자동 적용", rows[1]["resolution_note"])
+        self.assertIn("낮은 현재가를 자동 적용", rows[2]["resolution_note"])
+        self.assertEqual(result["products_status"], "unavailable")
+
+    def test_new_order_screenshot_price_lists_auto_use_row_amount_not_qty_times_amount(
+        self,
+    ):
+        result = _normalize_cart_extraction(
+            {
+                "items": [
+                    {
+                        "description": "초콜릿 미니",
+                        "option": "",
+                        "package_size": "20개입",
+                        "order_quantity": "2개",
+                        "unit_price": "9,560원",
+                        "item_amount": "9,560원",
+                        "confidence": "high",
+                    },
+                    {
+                        "description": "소프트캔디",
+                        "option": "2층, 택1",
+                        "package_size": "1kg",
+                        "order_quantity": "1개",
+                        "unit_price": "8,080원, 8,980원",
+                        "item_amount": "8,980원",
+                        "confidence": "low",
+                    },
+                    {
+                        "description": "과자",
+                        "option": "",
+                        "package_size": "100g",
+                        "order_quantity": "20개",
+                        "unit_price": "30,000원, 22,000원",
+                        "item_amount": "22,000원",
+                        "confidence": "low",
+                    },
+                    {
+                        "description": "초코숭이 알차케이크",
+                        "option": "",
+                        "package_size": "144g",
+                        "order_quantity": "20개",
+                        "unit_price": "54,400원",
+                        "item_amount": "54,400원",
+                        "confidence": "low",
+                    },
+                ],
+                "products_subtotal": "",
+                "shipping": "",
+                "discount": "",
+                "order_amount": "",
+                "payable": "",
+                "discount_present": False,
+            }
+        )
+
+        rows = result["items"]
+        self.assertEqual([row["amount"] for row in rows], [9560, 8080, 22000, 54400])
+        self.assertEqual([row["unit_price"] for row in rows], [4780, 8080, 1100, 2720])
+        self.assertEqual([row["order_quantity"] for row in rows], [2, 1, 20, 20])
+        self.assertTrue(all(row["quantity"] == 1 for row in rows))
+        self.assertTrue(all(not row["needs_review"] for row in rows))
+        self.assertIsNone(result["products_subtotal"])
+        self.assertEqual(result["products_status"], "unavailable")
+
+    def test_repeated_option_text_repairs_noisy_product_title(self):
+        result = _normalize_cart_extraction(
+            {
+                "items": [
+                    {
+                        "description": "[타마스] 달라 머스티드 소프트캔디",
+                        "option": "[다야스] 달라 어소티드 소프트캔디 2층, 택1",
+                        "package_size": "1kg",
+                        "order_quantity": "1개",
+                        "unit_price": "8,080원, 8,980원",
+                        "item_amount": "8,980원",
+                        "confidence": "low",
+                    }
+                ],
+                "products_subtotal": "",
+                "shipping": "",
+                "discount": "",
+                "order_amount": "",
+                "payable": "",
+                "discount_present": False,
+            }
+        )
+
+        item = result["items"][0]
+        self.assertEqual(item["description"], "[다야스] 달라 어소티드 소프트캔디")
+        self.assertEqual(item["option"], "2층, 택1")
+        self.assertEqual(item["amount"], 8080)
+        self.assertIn("낮은 현재가를 자동 적용", item["resolution_note"])
 
     @patch("supabase_app.receipt_ocr.httpx.post")
     def test_cart_image_uses_visual_information_extraction_schema(self, post):

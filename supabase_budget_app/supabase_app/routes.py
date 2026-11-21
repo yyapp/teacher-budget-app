@@ -391,11 +391,10 @@ def upload() -> Any:
             "구매 요청하기",
             "선택 상품 금액",
             "결제 예정 금액",
+            "주문 내역 상세",
+            "주문 상품",
         )
-        if (
-            not fields.get("items")
-            and sum(marker in raw_text for marker in cart_markers) >= 2
-        ):
+        if sum(marker in raw_text for marker in cart_markers) >= 2:
             try:
                 cart_fields = parse_cart_image(file_bytes, file.filename, content_type)
             except ReceiptOcrError:

@@ -932,8 +932,15 @@ class UploadAttachmentTests(unittest.TestCase):
             patch(
                 "supabase_app.routes.parse_receipt",
                 return_value={
-                    "items": [],
-                    "raw_text": "장바구니 목록 총 상품 금액 구매 요청하기 결제 예정 금액",
+                    "items": [
+                        {
+                            "description": "OCR에서 오염된 상품들",
+                            "quantity": 1,
+                            "unit_price": 1600,
+                            "amount": 1600,
+                        }
+                    ],
+                    "raw_text": "주문 내역 상세 주문 상품 배송완료 하루배송 상품 금액 50,400원",
                 },
             ),
             patch(

@@ -322,6 +322,7 @@ def cart_items_from_ocr(
                 "unit_price": unit_price,
                 "needs_review": bool(item.get("needs_review"))
                 or not isinstance(amount, (int, float)),
+                "resolution_note": item.get("resolution_note", ""),
                 "source_text": item.get("source_text", ""),
             }
         )
@@ -618,11 +619,11 @@ def parse_cart_image(
                             },
                             "unit_price": {
                                 "type": "string",
-                                "description": "시각적으로 단가라고 표시된 가격. 굵은 행 금액만 보이면 그 금액을 단가로 복사하지 말고 계산 또는 빈 문자열.",
+                                "description": "표시 가격을 모두 쉼표로 구분해 반환해도 됩니다. 취소선 정가와 굵은 현재가가 함께 있으면 둘 다 포함하고, 굵은 현재가가 item_amount입니다.",
                             },
                             "item_amount": {
                                 "type": "string",
-                                "description": "해당 상품 행 전체 금액. 굵게 표시된 행 합계가 있으면 그것을 사용하며 주문 수량을 다시 곱하지 않는다. 불명확하면 빈 문자열.",
+                                "description": "굵게 표시된 현재 판매 금액. 이 화면에서는 표시 금액이 품목 전체 금액이므로 주문 수량을 다시 곱하지 않습니다. 가격이 둘이면 취소선이 아닌 굵은 현재가를 사용합니다.",
                             },
                             "source_text": {
                                 "type": "string",
@@ -690,7 +691,8 @@ def parse_cart_image(
                         "장바구니/구매 전 주문 화면을 시각적 문맥으로 읽으세요. "
                         "상품 카드마다 상품명, 옵션, 포장 규격, 실제 주문 수량, 단가, 해당 행 전체 금액을 연결하세요. "
                         "주문 수량은 '18개', 포장 규격은 '20개입'처럼 의미가 다릅니다. "
-                        "행 굵은 금액은 단가가 아니라 해당 품목 전액일 수 있으니 단가와 행 금액을 구별하세요. "
+                        "이 주문 내역 화면에서는 굵은 현재 금액이 주문 수량 전체의 품목 금액입니다. 주문 수량을 금액에 다시 곱하지 마세요. "
+                        "취소선 정가와 굵은 현재가가 함께 있으면 취소선 가격은 후보로만 두고 굵은 현재가를 품목 금액으로 사용하세요. "
                         "상품 합계, 배송비, 할인, 할인 전 주문 금액, 할인 후 결제 예정액은 각각 별도 값입니다. "
                         "할인 전 주문 금액을 결제 예정액으로 혼동하지 마세요. "
                         "버튼, 메뉴, 안내문을 상품으로 만들지 마세요. 안 보이거나 모호한 값은 빈 문자열로 두고 추정하지 마세요. "
@@ -769,39 +771,77 @@ def _parse_optional_quantity(value: Any) -> Optional[int]:
     return int(match.group(0)) if match else None
 
 
+def _parse_amount_candidates(*values: Any) -> list[int]:
+    candidates = []
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, (int, float)):
+            candidates.append(int(value))
+        elif isinstance(value, list):
+            candidates.extend(_parse_amount_candidates(*value))
+        else:
+            candidates.extend(_amounts(str(value)))
+    return list(dict.fromkeys(amount for amount in candidates if amount > 0))
+
+
 def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
     items = []
     for item in result.get("items", []):
         description = re.sub(r"\s+", " ", str(item.get("description") or "")).strip()
         if not description or CART_UI_NOISE_RE.search(description):
             continue
+        option = re.sub(r"\s+", " ", str(item.get("option") or "")).strip()
+        package_size = re.sub(r"\s+", " ", str(item.get("package_size") or "")).strip()
+        description, option = _clean_product_and_option(description, option)
         order_quantity = _parse_optional_quantity(item.get("order_quantity"))
-        unit_price = _parse_optional_amount(item.get("unit_price"))
-        item_amount = _parse_optional_amount(item.get("item_amount"))
-        needs_review = (
-            order_quantity is None
-            or item_amount is None
-            or str(item.get("confidence", "")).lower() == "low"
+        price_candidates = _parse_amount_candidates(
+            item.get("displayed_prices"), item.get("unit_price")
         )
-        if not needs_review and unit_price is not None:
-            if unit_price * order_quantity != item_amount:
-                needs_review = True
-        if not needs_review and unit_price is None:
-            unit_price = item_amount / order_quantity
+        item_amount = _parse_optional_amount(item.get("item_amount"))
+        explicit_item_amount = item_amount
+        resolution_note = ""
+        if len(price_candidates) > 1:
+            item_amount = min(price_candidates)
+            resolution_note = (
+                "여러 표시 가격 중 낮은 현재가를 자동 적용했습니다: "
+                + " / ".join(f"{price:,}원" for price in sorted(price_candidates))
+            )
+        elif item_amount is None and price_candidates:
+            item_amount = price_candidates[0]
+            if str(item.get("confidence", "")).lower() == "low":
+                resolution_note = "표시 금액을 품목 행 전체 금액으로 자동 적용했습니다."
+        explicit_unit_price = _parse_optional_amount(item.get("unit_price"))
+        unit_price = None
+        if order_quantity and item_amount is not None:
+            if (
+                explicit_unit_price
+                and explicit_unit_price * order_quantity == item_amount
+            ):
+                unit_price = explicit_unit_price
+            else:
+                # For order-detail cards the bold displayed amount covers the whole row.
+                unit_price = item_amount / order_quantity
+        low_confidence = str(item.get("confidence", "")).lower() == "low"
+        needs_review = order_quantity is None or item_amount is None
+        if not resolution_note and low_confidence:
+            resolution_note = (
+                "상품 카드 연결 신뢰도가 낮아 판독 근거를 함께 표시합니다."
+            )
         items.append(
             {
                 "description": description,
-                "option": re.sub(r"\s+", " ", str(item.get("option") or "")).strip(),
-                "package_size": re.sub(
-                    r"\s+", " ", str(item.get("package_size") or "")
-                ).strip(),
+                "option": option,
+                "package_size": package_size,
                 "order_quantity": order_quantity or 1,
                 "quantity": 1,
                 "unit_price": unit_price,
                 "item_amount": item_amount,
                 "amount": item_amount,
-                "price_candidates": [item_amount] if item_amount is not None else [],
+                "price_candidates": price_candidates,
                 "needs_review": needs_review,
+                "confidence": str(item.get("confidence", "unknown")).lower(),
+                "resolution_note": resolution_note,
                 "source_text": str(item.get("source_text") or ""),
             }
         )
@@ -826,7 +866,7 @@ def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
         if products_subtotal is None
         else "review_required"
         if calculated_items_subtotal is None
-        or any(item["needs_review"] for item in items)
+        or any(item["needs_review"] or item["confidence"] == "low" for item in items)
         else "matched"
         if calculated_items_subtotal == products_subtotal
         else "mismatch"
@@ -876,3 +916,28 @@ def _normalize_cart_extraction(result: dict[str, Any]) -> dict[str, Any]:
         "raw_text": "",
         "extraction_method": "visual_information_extraction",
     }
+
+
+def _clean_product_and_option(description: str, option: str) -> tuple[str, str]:
+    """Use a repeated product line to repair a noisy title while retaining its option."""
+    if not option or not re.search(r"택\s*\d|\d\s*층", option):
+        return description, option
+    option_core = re.sub(r"\s*(?:\d+\s*층|택\s*\d).*$", "", option).strip(" -,/|")
+    words = lambda value: set(re.findall(r"[가-힣A-Za-z0-9]+", value.casefold()))
+    title_words = words(description)
+    option_words = words(option_core)
+    meaningful_title = {
+        word
+        for word in title_words
+        if word not in {"오리온", "다야스", "다이아스", "타마스", "타이스"}
+    }
+    overlap = meaningful_title & option_words
+    if (
+        len(overlap) >= 2
+        and len(overlap) / max(1, min(len(meaningful_title), len(option_words))) >= 0.4
+    ):
+        remaining_option = re.sub(re.escape(option_core), "", option, count=1).strip(
+            " -,/|"
+        )
+        return option_core, remaining_option
+    return description, option
