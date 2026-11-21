@@ -9,7 +9,11 @@
     {% if review["items"] %}
     <div class="alert alert-success">{{ review["items"]|length }}개 품목을 읽었습니다.</div>
     {% else %}
-    <div class="alert alert-error">품목을 찾지 못했습니다. 품목과 금액이 선명하게 보이도록 다시 촬영해 주세요.</div>
+    <div class="alert alert-error">품목 행을 자동으로 나누지 못했습니다. 첨부파일과 판독 내용은 보관되어 있습니다. 이미지가 구매 전 장바구니 화면이면 장바구니 메뉴에서 검토해 주세요.</div>
+    <p><a class="btn btn-secondary" href="{{ url_for('app.cart_review') }}">장바구니 이미지 검토로 이동</a></p>
+    {% if review.raw_text %}
+    <details style="margin:12px 0;"><summary>이미지에서 읽은 원문 보기</summary><pre style="white-space:pre-wrap;max-height:300px;overflow:auto;background:#f7f7f7;padding:12px;">{{ review.raw_text }}</pre></details>
+    {% endif %}
     {% endif %}
     <form method="post" style="max-width: 600px;">
         <div class="form-group">

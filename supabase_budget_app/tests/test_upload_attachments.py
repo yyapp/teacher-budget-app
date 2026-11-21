@@ -830,7 +830,7 @@ class UploadAttachmentTests(unittest.TestCase):
         self.assertIn("추가 서류 파일 선택 취소".encode(), response.data)
         self.assertIn("input.value = ''".encode(), response.data)
 
-    def test_upload_with_no_detected_items_discards_temp_file_and_parse_data(self):
+    def test_upload_with_no_detected_items_keeps_file_and_ocr_text(self):
         with (
             patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
             patch(
@@ -839,7 +839,15 @@ class UploadAttachmentTests(unittest.TestCase):
             ),
             patch(
                 "supabase_app.routes.parse_receipt",
-                return_value={"items": [], "amount": ""},
+                return_value={
+                    "items": [],
+                    "amount": "",
+                    "description": "",
+                    "quantity": 1,
+                    "receipt_date": "2026-11-21",
+                    "vendor": "거래처미상",
+                    "raw_text": "상품 이름 가격 글자는 읽혔지만 행 연결이 불명확",
+                },
             ),
             patch(
                 "supabase_app.routes.services.unique_evidence_filename",
@@ -861,10 +869,94 @@ class UploadAttachmentTests(unittest.TestCase):
                 content_type="multipart/form-data",
             )
             with client.session_transaction() as state:
-                self.assertNotIn("pending_receipt", state)
+                self.assertEqual(
+                    state["pending_receipt"]["raw_text"],
+                    "상품 이름 가격 글자는 읽혔지만 행 연결이 불명확",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "첨부파일과 판독 내용은 보관되어 있습니다".encode(), response.data
+        )
+        self.assertIn(
+            "상품 이름 가격 글자는 읽혔지만 행 연결이 불명확".encode(), response.data
+        )
+        with client.session_transaction() as state:
+            self.assertEqual(
+                state["pending_receipt"]["receipt_path"], "raw/temp/receipt.jpg"
+            )
+        delete.assert_not_called()
+
+    def test_cart_screenshot_uploaded_as_receipt_switches_to_cart_review(self):
+        cart_fields = {
+            "items": [
+                {
+                    "description": "수첩",
+                    "order_quantity": 18,
+                    "quantity": 1,
+                    "unit_price": 1600,
+                    "item_amount": 28800,
+                    "amount": 28800,
+                    "needs_review": False,
+                },
+                {
+                    "description": "산타모자",
+                    "order_quantity": 18,
+                    "quantity": 1,
+                    "unit_price": 1200,
+                    "item_amount": 21600,
+                    "amount": 21600,
+                    "needs_review": False,
+                },
+            ],
+            "products_subtotal": 50400,
+            "calculated_items_subtotal": 50400,
+            "shipping": 3000,
+            "discount": 4510,
+            "order_amount": 53400,
+            "calculated_order_amount": 53400,
+            "order_amount_status": "matched",
+            "payable": 48890,
+            "calculated_payable": 48890,
+            "products_status": "matched",
+            "payable_status": "matched",
+            "discount_seen": True,
+            "extraction_method": "visual_information_extraction",
+        }
+        with (
+            patch.dict(os.environ, {"ACCESS_PASSWORD": ""}),
+            patch(
+                "supabase_app.routes.services.list_budgets",
+                return_value=[{"id": "budget-id", "name": "학급비"}],
+            ),
+            patch(
+                "supabase_app.routes.parse_receipt",
+                return_value={
+                    "items": [],
+                    "raw_text": "장바구니 목록 총 상품 금액 구매 요청하기 결제 예정 금액",
+                },
+            ),
+            patch(
+                "supabase_app.routes.parse_cart_image", return_value=cart_fields
+            ) as parse_cart,
+        ):
+            client = app.test_client()
+            response = client.post(
+                "/upload",
+                data={
+                    "budget_id": "budget-id",
+                    "receipt_file": (io.BytesIO(b"cart image"), "cart.png"),
+                },
+                content_type="multipart/form-data",
+            )
+            with client.session_transaction() as state:
+                review = state["cart_image_review"]
 
         self.assertEqual(response.status_code, 302)
-        delete.assert_called_once_with("raw/temp/receipt.jpg")
+        self.assertEqual(response.headers["Location"], "/cart-review")
+        self.assertEqual([item["amount"] for item in review["items"]], [28800, 21600])
+        self.assertEqual(review["cart_summary"]["payable"], 48890)
+        parse_cart.assert_called_once()
 
     def test_evidence_filename_has_budget_date_vendor_and_extension(self):
         self.assertEqual(

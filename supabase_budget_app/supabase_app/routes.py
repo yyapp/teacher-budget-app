@@ -384,6 +384,82 @@ def upload() -> Any:
             flash(str(exc), "error")
             return redirect(url_for("app.upload"))
 
+        raw_text = fields.get("raw_text", "")
+        cart_markers = (
+            "장바구니 목록",
+            "총 상품 금액",
+            "구매 요청하기",
+            "선택 상품 금액",
+            "결제 예정 금액",
+        )
+        if (
+            not fields.get("items")
+            and sum(marker in raw_text for marker in cart_markers) >= 2
+        ):
+            try:
+                cart_fields = parse_cart_image(file_bytes, file.filename, content_type)
+            except ReceiptOcrError:
+                cart_fields = {"items": []}
+            if cart_fields.get("items"):
+                cart_items = cart_items_from_ocr(cart_fields["items"])
+                line_total = sum(
+                    item["amount"]
+                    for item in cart_items
+                    if isinstance(item.get("amount"), (int, float))
+                )
+                payable = cart_fields.get("payable")
+                summary = {
+                    key: cart_fields.get(key)
+                    for key in (
+                        "products_subtotal",
+                        "calculated_items_subtotal",
+                        "shipping",
+                        "discount",
+                        "discount_seen",
+                        "discount_inferred_zero",
+                        "order_amount",
+                        "calculated_order_amount",
+                        "order_amount_status",
+                        "payable",
+                        "calculated_payable",
+                        "products_status",
+                        "payable_status",
+                        "summary_seen",
+                        "extraction_method",
+                    )
+                }
+                if payable is not None:
+                    suggested_total, total_source = payable, "image"
+                elif cart_fields.get("calculated_payable") is not None:
+                    suggested_total, total_source = (
+                        cart_fields["calculated_payable"],
+                        "calculated",
+                    )
+                elif cart_fields.get("order_amount") is not None:
+                    suggested_total, total_source = (
+                        cart_fields["order_amount"],
+                        "order_amount_image",
+                    )
+                else:
+                    suggested_total, total_source = line_total, "items_estimate"
+                session["cart_image_review"] = {
+                    "budget_id": budget_id,
+                    "items": cart_items,
+                    "receipt_total": suggested_total,
+                    "total_source": total_source,
+                    "items_total": line_total,
+                    "cart_summary": summary,
+                    "notes": "",
+                    "extraction_method": cart_fields.get(
+                        "extraction_method", "ocr_fallback"
+                    ),
+                }
+                flash(
+                    "장바구니 이미지로 인식해 장바구니 검토 화면으로 열었습니다.",
+                    "success",
+                )
+                return redirect(url_for("app.cart_review"))
+
         receipt_date = fields.get("receipt_date") or date.today().isoformat()
         vendor = fields.get("vendor") or "거래처미상"
         filename = services.unique_evidence_filename(
@@ -447,16 +523,16 @@ def upload() -> Any:
             "additional_document_path": additional_document_path,
             "additional_document_filename": additional_document_filename,
             **{key: value for key, value in fields.items() if key != "raw_text"},
+            "raw_text": raw_text[:12000],
         }
         pending.setdefault("items", [])
         if not pending["items"]:
             session["pending_receipt"] = pending
-            _clear_pending_ocr_reviews()
             flash(
-                "영수증 품목을 읽지 못해 임시 파일과 파싱 결과를 지웠습니다. 더 선명한 이미지로 다시 올려 주세요.",
+                "이미지 글자는 읽었지만 품목 행을 분리하지 못했습니다. 파일과 판독 원문을 보관했으니 아래 원문을 확인하거나 장바구니 메뉴로 전환해 보세요.",
                 "error",
             )
-            return redirect(url_for("app.upload"))
+            return render_template("upload.html", budgets=budgets, review=pending)
         pending["items_total"] = sum(
             item["amount"]
             for item in pending["items"]
